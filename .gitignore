@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+tasks/
+tests/
+.tamu_chrome_profile/
