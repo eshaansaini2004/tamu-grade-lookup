@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TAMU Registration+ Local Test</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #f9fafb; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    td { border: 1px solid #d1d5db; padding: 6px 10px; font-size: 13px; }
+    ul { margin: 0; padding: 0 0 0 16px; }
+    li { margin: 4px 0; }
+    h2 { margin-top: 32px; font-size: 14px; color: #6b7280; }
+    #log { background: #1f2937; color: #d1fae5; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre; margin-top: 20px; }
+  </style>
+</head>
+<body>
+
+<h1>TAMU Registration+ — Local Test</h1>
+<p>Mocks the Schedule Builder DOM and chrome API. Badges should appear next to instructor names.</p>
+
+<!-- ── Two sections, same course, different instructors ── -->
+<table>
+  <tbody id="tbody-1">
+    <tr>
+      <td><input type="checkbox" id="checkbox_57876" aria-label="Select CSCE 120 - 200"></td>
+      <td><button>i</button></td>
+      <td>57876</td>
+      <td><span>CSCE</span></td>
+      <td><span>120</span></td>
+      <td><span>200</span></td>
+      <td><span>3</span></td>
+      <td><span>12</span></td>
+      <td>Traditional Face-to-Face (F2F)</td>
+      <td>MWF 9:10–10:00 ZACH 350</td>
+    </tr>
+    <tr>
+      <td colspan="10">
+        <ul class="fields">
+          <li>
+            <strong><span>Instructor</span>: </strong>
+            <span>Carlisle, Martin</span>
+          </li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+
+  <tbody id="tbody-2">
+    <tr>
+      <td><input type="checkbox" id="checkbox_57877" aria-label="Select CSCE 120 - 201"></td>
+      <td><button>i</button></td>
+      <td>57877</td>
+      <td><span>CSCE</span></td>
+      <td><span>120</span></td>
+      <td><span>201</span></td>
+      <td><span>3</span></td>
+      <td><span>5</span></td>
+      <td>Traditional Face-to-Face (F2F)</td>
+      <td>MWF 10:20–11:10 ZACH 350</td>
+    </tr>
+    <tr>
+      <td colspan="10">
+        <ul class="fields">
+          <li>
+            <strong><span>Instructor</span>: </strong>
+            <span>Beideman, Sarah</span>
+          </li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+
+  <tbody id="tbody-3">
+    <tr>
+      <td><input type="checkbox" id="checkbox_57878" aria-label="Select CSCE 120 - 202"></td>
+      <td><button>i</button></td>
+      <td>57878</td>
+      <td><span>CSCE</span></td>
+      <td><span>120</span></td>
+      <td><span>202</span></td>
+      <td><span>3</span></td>
+      <td><span>0</span></td>
+      <td>Traditional Face-to-Face (F2F)</td>
+      <td>TTh 11:10–12:25 ZACH 350</td>
+    </tr>
+    <tr>
+      <td colspan="10">
+        <ul class="fields">
+          <li>
+            <strong><span>Instructor</span>: </strong>
+            <span>Not Assigned</span>
+          </li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<div id="log">Waiting for badge injection...</div>
+
+<script>
+// ── Mock chrome API ────────────────────────────────────────────────────────────
+const MOCK_DATA = {
+  'Carlisle, Martin': {
+    gradeData: { avgGpa: 3.72, pctA: 68, pctB: 20, pctC: 8, pctD: 2, pctF: 2, semCount: 6 },
+    rmpData:   { rating: 4.2, weighted: 4.1, count: 87 }
+  },
+  'Beideman, Sarah': {
+    gradeData: { avgGpa: 2.95, pctA: 42, pctB: 30, pctC: 18, pctD: 6, pctF: 4, semCount: 3 },
+    rmpData:   { rating: 3.1, weighted: 3.2, count: 23 }
+  },
+};
+
+window.chrome = {
+  runtime: {
+    sendMessage(msg, cb) {
+      const data = MOCK_DATA[msg.instructorName] ?? { gradeData: null, rmpData: null };
+      setTimeout(() => cb(data), 150 + Math.random() * 200);
+    },
+    lastError: null,
+  }
+};
+
+// ── Log helper ─────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+const origConsoleWarn = console.warn;
+function log(msg) {
+  logEl.textContent += '\n' + msg;
+  console.log(msg);
+}
+
+// Watch for badge injection
+const testObserver = new MutationObserver(muts => {
+  for (const m of muts) {
+    for (const n of m.addedNodes) {
+      if (n.classList?.contains('trp-badge'))   log(`✓ badge injected: "${n.textContent.trim().slice(0,40)}"`);
+      if (n.classList?.contains('trp-pick-best-wrap')) log(`✓ Pick Best button injected`);
+    }
+  }
+});
+testObserver.observe(document.body, { childList: true, subtree: true });
+
+log('chrome mock ready, loading content.js...');
+</script>
+
+<!-- Load the real content.js after the mock is set up -->
+<script src="content.js"></script>
+
+</body>
+</html>

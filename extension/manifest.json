@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "TAMU Registration+",
+  "version": "1.0.0",
+  "description": "GPA, grade distribution, and RMP ratings inside Schedule Builder",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "*://tamu.collegescheduler.com/*",
+    "*://anex.us/*",
+    "*://www.ratemyprofessors.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://tamu.collegescheduler.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "TAMU Registration+"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
