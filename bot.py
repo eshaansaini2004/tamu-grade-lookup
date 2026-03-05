@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import queue
+import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from dotenv import load_dotenv
 
 import discord
@@ -21,7 +24,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Reuse all existing logic
 sys.path.insert(0, os.path.dirname(__file__))
-from auth import get_context
+from auth import get_context, PROFILES_DIR
 from schedule import get_all_sections, select_sections, reset_sections
 from scraper import fetch_course
 from models import CourseReport, SectionInfo
@@ -30,8 +33,23 @@ from lookup import parse_courses, build_report, format_report, _fmt_section
 executor = ThreadPoolExecutor(max_workers=1)  # one browser at a time
 
 
-def _run_lookup(courses: list[tuple[str, str]]) -> str:
-    pw, ctx = get_context()
+def _has_session(user_id: str) -> bool:
+    profile_dir = PROFILES_DIR / user_id
+    return profile_dir.exists() and any(profile_dir.iterdir())
+
+
+def _run_login(user_id: str, code_queue: queue.Queue) -> None:
+    """
+    Runs login in a thread. When Duo shows a code on screen, puts it in code_queue
+    so the Discord handler can forward it to the user. Then blocks until Duo approves.
+    """
+    pw, ctx = get_context(user_id, on_duo_code=code_queue.put, headless=True)
+    ctx.close()
+    pw.stop()
+
+
+def _run_lookup(user_id: str, courses: list[tuple[str, str]]) -> str:
+    pw, ctx = get_context(user_id)
     try:
         sections_data = get_all_sections(courses, ctx)
     finally:
@@ -45,9 +63,9 @@ def _run_lookup(courses: list[tuple[str, str]]) -> str:
     return "".join(format_report(r) for r in reports)
 
 
-def _run_select(triplets: list[tuple[str, str, str]]) -> str:
+def _run_select(user_id: str, triplets: list[tuple[str, str, str]]) -> str:
     unique_courses = [(dept, num) for dept, num, _ in triplets]
-    pw, ctx = get_context()
+    pw, ctx = get_context(user_id)
     try:
         sections_data = get_all_sections(unique_courses, ctx)
         selections = [
@@ -70,8 +88,8 @@ def _run_select(triplets: list[tuple[str, str, str]]) -> str:
     return "\n".join(lines) if lines else "Nothing selected."
 
 
-def _run_reset(courses: list[tuple[str, str]]) -> str:
-    pw, ctx = get_context()
+def _run_reset(user_id: str, courses: list[tuple[str, str]]) -> str:
+    pw, ctx = get_context(user_id)
     try:
         reset_sections(courses, ctx)
     finally:
@@ -125,9 +143,57 @@ def _chunk(text: str, limit: int = 1900) -> list[str]:
     return chunks or ["(no output)"]
 
 
+@client.tree.command(name="login", description="Log in to TAMU — bot fills your creds, you enter the Duo code")
+async def login(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    code_queue: queue.Queue = queue.Queue()
+
+    await interaction.response.defer(thinking=True)
+    loop = asyncio.get_event_loop()
+    login_future = loop.run_in_executor(executor, _run_login, user_id, code_queue)
+
+    # Wait for the Duo code to be scraped from the browser
+    try:
+        duo_code = await asyncio.wait_for(
+            loop.run_in_executor(None, code_queue.get),
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        await interaction.followup.send("Timed out waiting for Duo to load. Try `/login` again.")
+        return
+
+    if duo_code:
+        await interaction.followup.send(f"Enter this code in your Duo Mobile app: **{duo_code}**")
+    else:
+        await interaction.followup.send("Couldn't read the Duo code — check the browser window.")
+
+    try:
+        await login_future
+    except Exception as e:
+        await interaction.followup.send(f"Login failed: {e}")
+        return
+
+    await interaction.followup.send("Logged in. Session saved.")
+
+
+@client.tree.command(name="logout", description="Log out and delete your saved TAMU session")
+async def logout(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    profile_dir = PROFILES_DIR / user_id
+    if profile_dir.exists():
+        shutil.rmtree(profile_dir)
+        await interaction.response.send_message("Logged out. Profile deleted.")
+    else:
+        await interaction.response.send_message("No session found.")
+
+
 @client.tree.command(name="lookup", description="Grade report for courses. E.g: CSCE 120 ENGL 210")
 @app_commands.describe(courses="Space-separated DEPT NUM pairs: CSCE 120 ENGL 210")
 async def lookup(interaction: discord.Interaction, courses: str):
+    user_id = str(interaction.user.id)
+    if not _has_session(user_id):
+        await interaction.response.send_message("No session found. Run /login first.")
+        return
     await interaction.response.defer(thinking=True)
     try:
         course_list = _parse_course_str(courses)
@@ -137,7 +203,7 @@ async def lookup(interaction: discord.Interaction, courses: str):
 
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(executor, _run_lookup, course_list)
+        result = await loop.run_in_executor(executor, _run_lookup, user_id, course_list)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
         return
@@ -151,6 +217,10 @@ async def lookup(interaction: discord.Interaction, courses: str):
 @client.tree.command(name="select", description="Select sections by prof. E.g: CSCE 120 Beideman ENGL 210 Baca")
 @app_commands.describe(selections="Triplets: DEPT NUM INSTRUCTOR — CSCE 120 Beideman ENGL 210 Baca")
 async def select(interaction: discord.Interaction, selections: str):
+    user_id = str(interaction.user.id)
+    if not _has_session(user_id):
+        await interaction.response.send_message("No session found. Run /login first.")
+        return
     await interaction.response.defer(thinking=True)
     try:
         triplets = _parse_triplet_str(selections)
@@ -160,7 +230,7 @@ async def select(interaction: discord.Interaction, selections: str):
 
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(executor, _run_select, triplets)
+        result = await loop.run_in_executor(executor, _run_select, user_id, triplets)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
         return
@@ -171,6 +241,10 @@ async def select(interaction: discord.Interaction, selections: str):
 @client.tree.command(name="reset", description="Restore all sections for courses. E.g: CSCE 120 ENGL 210")
 @app_commands.describe(courses="Space-separated DEPT NUM pairs: CSCE 120 ENGL 210")
 async def reset(interaction: discord.Interaction, courses: str):
+    user_id = str(interaction.user.id)
+    if not _has_session(user_id):
+        await interaction.response.send_message("No session found. Run /login first.")
+        return
     await interaction.response.defer(thinking=True)
     try:
         course_list = _parse_course_str(courses)
@@ -180,7 +254,7 @@ async def reset(interaction: discord.Interaction, courses: str):
 
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(executor, _run_reset, course_list)
+        result = await loop.run_in_executor(executor, _run_reset, user_id, course_list)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
         return
