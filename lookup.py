@@ -19,7 +19,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from auth import get_context
 from models import CourseReport, SectionInfo
-from schedule import get_all_sections, select_sections, reset_sections
+from schedule import select_sections, reset_sections
+from howdy import get_sections_for_courses
 from scraper import fetch_course
 
 
@@ -174,9 +175,9 @@ def main() -> None:
         unique_courses = [(dept, num) for dept, num, _ in triplets]
 
         print(f"Selecting sections for {len(triplets)} course(s)...", file=sys.stderr)
+        sections_data = get_sections_for_courses(unique_courses)
         pw, ctx = get_context()
         try:
-            sections_data = get_all_sections(unique_courses, ctx)
             selections = [
                 (f"{dept} {num}", instr, sections_data.get(f"{dept} {num}", []))
                 for dept, num, instr in triplets
@@ -202,17 +203,12 @@ def main() -> None:
 
     print(f"Looking up {len(courses)} course(s)...", file=sys.stderr)
 
-    # Step 1: Schedule Builder — get Fall 2026 sections
-    print("Opening Schedule Builder...", file=sys.stderr)
-    pw, ctx = get_context()
+    # Step 1: Howdy public API — get Fall 2026 sections (no login needed)
     try:
-        sections_data = get_all_sections(courses, ctx)
+        sections_data = get_sections_for_courses(courses)
     except Exception as e:
-        print(f"ERROR: Schedule Builder failed — {e}", file=sys.stderr)
+        print(f"ERROR: Howdy API failed — {e}", file=sys.stderr)
         sections_data = {}
-    finally:
-        ctx.close()
-        pw.stop()
 
     # Step 2: anex.us historical data
     reports: list[CourseReport] = []

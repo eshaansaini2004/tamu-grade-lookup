@@ -25,7 +25,8 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 # Reuse all existing logic
 sys.path.insert(0, os.path.dirname(__file__))
 from auth import get_context, PROFILES_DIR
-from schedule import get_all_sections, select_sections, reset_sections
+from schedule import select_sections, reset_sections
+from howdy import get_sections_for_courses
 from scraper import fetch_course
 from models import CourseReport, SectionInfo
 from lookup import parse_courses, build_report, format_report, _fmt_section
@@ -48,14 +49,8 @@ def _run_login(user_id: str, code_queue: queue.Queue) -> None:
     pw.stop()
 
 
-def _run_lookup(user_id: str, courses: list[tuple[str, str]]) -> str:
-    pw, ctx = get_context(user_id)
-    try:
-        sections_data = get_all_sections(courses, ctx)
-    finally:
-        ctx.close()
-        pw.stop()
-
+def _run_lookup(courses: list[tuple[str, str]]) -> str:
+    sections_data = get_sections_for_courses(courses)
     reports = [
         build_report(dept, number, sections_data.get(f"{dept} {number}", []))
         for dept, number in courses
@@ -65,9 +60,9 @@ def _run_lookup(user_id: str, courses: list[tuple[str, str]]) -> str:
 
 def _run_select(user_id: str, triplets: list[tuple[str, str, str]]) -> str:
     unique_courses = [(dept, num) for dept, num, _ in triplets]
+    sections_data = get_sections_for_courses(unique_courses)
     pw, ctx = get_context(user_id)
     try:
-        sections_data = get_all_sections(unique_courses, ctx)
         selections = [
             (f"{dept} {num}", instr, sections_data.get(f"{dept} {num}", []))
             for dept, num, instr in triplets
@@ -190,10 +185,6 @@ async def logout(interaction: discord.Interaction):
 @client.tree.command(name="lookup", description="Grade report for courses. E.g: CSCE 120 ENGL 210")
 @app_commands.describe(courses="Space-separated DEPT NUM pairs: CSCE 120 ENGL 210")
 async def lookup(interaction: discord.Interaction, courses: str):
-    user_id = str(interaction.user.id)
-    if not _has_session(user_id):
-        await interaction.response.send_message("No session found. Run /login first.")
-        return
     await interaction.response.defer(thinking=True)
     try:
         course_list = _parse_course_str(courses)
@@ -203,7 +194,7 @@ async def lookup(interaction: discord.Interaction, courses: str):
 
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(executor, _run_lookup, user_id, course_list)
+        result = await loop.run_in_executor(executor, _run_lookup, course_list)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
         return
