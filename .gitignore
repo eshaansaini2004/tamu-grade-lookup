@@ -7,3 +7,7 @@ tasks/
 tests/
 .tamu_chrome_profile/
 .playwright-mcp/
+node_modules/
+dist/
+package-lock.json
+CLAUDE.md
