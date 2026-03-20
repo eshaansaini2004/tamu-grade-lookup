@@ -222,7 +222,7 @@ export default function App() {
     // Listen for changes from content script
     const unsub = storageOnChanged((changes) => {
       if (changes.savedSections) {
-        setSavedSections(Object.values(changes.savedSections));
+        setSavedSections(Object.values(changes.savedSections ?? {}));
       }
     });
 
@@ -264,6 +264,26 @@ export default function App() {
       <div style={C.body}>
         {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
         {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} />}
+      </div>
+
+      <div style={{ padding: '0 16px 12px', borderTop: '1px solid #1f2937' }}>
+        <button
+          style={{
+            width: '100%',
+            marginTop: 10,
+            padding: '7px 0',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#f9fafb',
+            background: '#500000',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+          }}
+          onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('src/calendar/index.html') })}
+        >
+          Open Calendar
+        </button>
       </div>
     </div>
   );

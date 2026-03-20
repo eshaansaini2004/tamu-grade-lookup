@@ -17,7 +17,6 @@ export default defineManifest({
       matches: ['*://tamu.collegescheduler.com/*'],
       js: ['src/content/interceptor.ts'],
       run_at: 'document_idle',
-      // @ts-expect-error — @crxjs types don't include world yet, Chrome 111+ supports it
       world: 'MAIN',
     },
     {
