@@ -3,7 +3,7 @@ import { sendGetPageStats } from '../shared/messages';
 import type { PageStats } from '../shared/messages';
 import { storageGet, removeSection, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
-import type { SavedSection } from '../shared/types';
+import type { SavedSection, Schedule } from '../shared/types';
 
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
 
@@ -212,18 +212,24 @@ export default function App() {
   const [status, setStatus] = useState<Status>('loading');
   const [stats, setStats] = useState<PageStats | null>(null);
   const [savedSections, setSavedSections] = useState<SavedSection[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [activeScheduleId, setActiveScheduleId] = useState<string | null>(null);
 
   useEffect(() => {
     // Load saved sections
     storageGet('savedSections').then((saved) => {
       setSavedSections(Object.values(saved));
     });
+    storageGet('schedules').then(setSchedules);
+    storageGet('activeScheduleId').then(setActiveScheduleId);
 
     // Listen for changes from content script
     const unsub = storageOnChanged((changes) => {
-      if (changes.savedSections) {
+      if (changes.savedSections !== undefined) {
         setSavedSections(Object.values(changes.savedSections ?? {}));
       }
+      if (changes.schedules !== undefined) setSchedules(changes.schedules ?? []);
+      if (changes.activeScheduleId !== undefined) setActiveScheduleId(changes.activeScheduleId ?? null);
     });
 
     // Load page stats
@@ -246,12 +252,19 @@ export default function App() {
     await removeSection(crn);
   };
 
+  const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;
+
   return (
     <div style={C.wrap}>
       <div style={C.header}>
         <div style={C.title}>
           <div style={C.dot(status === 'ready')} />
           TAMU Registration+
+          {activeSchedule && (
+            <span style={{ fontSize: 9, fontWeight: 500, color: '#6b7280', letterSpacing: 0, textTransform: 'none', marginLeft: 4 }}>
+              · {activeSchedule.name}
+            </span>
+          )}
         </div>
         <div style={C.tabs}>
           <button style={C.tab(tab === 'overview')} onClick={() => setTab('overview')}>Overview</button>

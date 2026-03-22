@@ -50,3 +50,46 @@ export async function removeSection(crn: string): Promise<void> {
   });
   await sectionWriteLock;
 }
+
+// Serializes concurrent read-modify-write ops on schedules
+let scheduleWriteLock: Promise<void> = Promise.resolve();
+
+export async function saveSchedule(schedule: import('./types').Schedule): Promise<void> {
+  scheduleWriteLock = scheduleWriteLock.then(async () => {
+    const schedules = await storageGet('schedules');
+    const idx = schedules.findIndex((s) => s.id === schedule.id);
+    if (idx >= 0) schedules[idx] = schedule;
+    else schedules.push(schedule);
+    await storageSet('schedules', schedules);
+  });
+  await scheduleWriteLock;
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  scheduleWriteLock = scheduleWriteLock.then(async () => {
+    const schedules = await storageGet('schedules');
+    await storageSet('schedules', schedules.filter((s) => s.id !== id));
+    const active = await storageGet('activeScheduleId');
+    if (active === id) await storageSet('activeScheduleId', null);
+  });
+  await scheduleWriteLock;
+}
+
+export async function setActiveSchedule(id: string | null): Promise<void> {
+  await storageSet('activeScheduleId', id);
+}
+
+// Atomic toggle of a CRN within a schedule — avoids stale-closure race
+export async function toggleCrnInSchedule(scheduleId: string, crn: string): Promise<void> {
+  scheduleWriteLock = scheduleWriteLock.then(async () => {
+    const schedules = await storageGet('schedules');
+    const sched = schedules.find((s) => s.id === scheduleId);
+    if (!sched) return;
+    const has = sched.sectionCrns.includes(crn);
+    sched.sectionCrns = has
+      ? sched.sectionCrns.filter((c) => c !== crn)
+      : [...sched.sectionCrns, crn];
+    await storageSet('schedules', schedules);
+  });
+  await scheduleWriteLock;
+}
