@@ -1,6 +1,7 @@
 // Content script — injected into tamu.collegescheduler.com
 
 import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { sendLookup } from '../shared/messages';
 import type { PageStats } from '../shared/messages';
 import type { GradeData, MeetingTime, RmpData, SavedSection } from '../shared/types';
@@ -9,6 +10,7 @@ import { parseMeetingFromApi } from '../shared/conflictDetection';
 import { gpaColorClass } from '../shared/gradeUtils';
 import { mountPanel, rerenderPanel, unmountPanel } from './mount';
 import SectionComparison, { type InstructorData } from './components/SectionComparison';
+import CourseSearch from './components/CourseSearch';
 
 const BADGE_ATTR = 'data-trp';
 
@@ -456,3 +458,48 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 console.log('[TRP] content script loaded on', location.href);
 console.log('[TRP] instructor <li>s found on initial scan:', findInstructorLis(document).length);
+
+// ─── floating course search panel ─────────────────────────────────────────────
+
+(function mountSearchPanel() {
+  // Floating toggle button
+  const btn = document.createElement('button');
+  btn.dataset.trpPanel = 'search-trigger';
+  btn.textContent = '🔍 Professors';
+  Object.assign(btn.style, {
+    position: 'fixed',
+    bottom: '20px',
+    right: '20px',
+    zIndex: '999998',
+    padding: '8px 14px',
+    fontSize: '12px',
+    fontWeight: '700',
+    background: '#500000',
+    color: '#f9fafb',
+    border: 'none',
+    borderRadius: '20px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  });
+  document.body.appendChild(btn);
+
+  // Mount directly into body (no shadow DOM) so position:fixed is relative to viewport.
+  // Shadow DOM containers can create new stacking contexts that break fixed positioning.
+  const container = document.createElement('div');
+  container.dataset.trpPanel = 'search-panel';
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  let open = false;
+
+  function render() {
+    if (open) {
+      root.render(createElement(CourseSearch, { onClose: () => { open = false; render(); } }));
+    } else {
+      root.render(null);
+    }
+  }
+
+  btn.addEventListener('click', () => { open = !open; render(); });
+})();

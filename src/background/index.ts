@@ -4,7 +4,7 @@ import { ANEX_URL, RMP_URL, RMP_SCHOOL_ID, RMP_AUTH, RMP_QUERY, GRADE_TTL_MS, RM
 import { parseGradeRows } from '../shared/gradeUtils';
 import { matchProf, pickBestRmp, parseName } from '../shared/nameMatch';
 import type { GradeData, RmpData } from '../shared/types';
-import type { LookupResponse } from '../shared/messages';
+import type { LookupResponse, CourseSearchResponse, RankedInstructor } from '../shared/messages';
 
 // ─── cache ────────────────────────────────────────────────────────────────────
 
@@ -85,22 +85,56 @@ async function fetchRmp(instructorName: string, dept: string): Promise<RmpData |
 // ─── message handler ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type !== 'LOOKUP') return false;
-  const { dept, number, instructorName } = msg as { type: 'LOOKUP'; dept: string; number: string; instructorName: string };
+  if (msg.type === 'LOOKUP') {
+    const { dept, number, instructorName } = msg as { type: 'LOOKUP'; dept: string; number: string; instructorName: string };
+    (async () => {
+      try {
+        const [profs, rmpData] = await Promise.all([
+          fetchGrades(dept, number),
+          fetchRmp(instructorName, dept),
+        ]);
+        const gradeData = profs ? matchProf(profs, instructorName) : null;
+        sendResponse({ gradeData, rmpData } satisfies LookupResponse);
+      } catch (err) {
+        console.error('LOOKUP error:', err);
+        sendResponse({ gradeData: null, rmpData: null } satisfies LookupResponse);
+      }
+    })();
+    return true;
+  }
 
-  (async () => {
-    try {
-      const [profs, rmpData] = await Promise.all([
-        fetchGrades(dept, number),
-        fetchRmp(instructorName, dept),
-      ]);
-      const gradeData = profs ? matchProf(profs, instructorName) : null;
-      sendResponse({ gradeData, rmpData } satisfies LookupResponse);
-    } catch (err) {
-      console.error('LOOKUP error:', err);
-      sendResponse({ gradeData: null, rmpData: null } satisfies LookupResponse);
-    }
-  })();
+  if (msg.type === 'COURSE_SEARCH') {
+    const { dept, number } = msg as { type: 'COURSE_SEARCH'; dept: string; number: string };
+    (async () => {
+      try {
+        const profs = await fetchGrades(dept, number);
+        if (!profs) { sendResponse({ instructors: [] } satisfies CourseSearchResponse); return; }
 
-  return true;
+        // Sort by GPA, take top 10 before fetching RMP (avoid 30+ parallel requests)
+        const top = Object.values(profs)
+          .filter((g) => g.avgGpa > 0)
+          .sort((a, b) => b.avgGpa - a.avgGpa)
+          .slice(0, 10);
+
+        const results = await Promise.all(
+          top.map(async (g): Promise<RankedInstructor> => {
+            const rmpData = await fetchRmp(g.name, dept);
+            // Normalize both to 0–1 range, weight GPA more
+            const gpaScore = g.avgGpa / 4;
+            const rmpScore = rmpData ? rmpData.weighted / 5 : gpaScore * 0.9;
+            return { name: g.name, gradeData: g, rmpData, score: gpaScore * 0.65 + rmpScore * 0.35 };
+          })
+        );
+
+        results.sort((a, b) => b.score - a.score);
+        sendResponse({ instructors: results } satisfies CourseSearchResponse);
+      } catch (err) {
+        console.error('COURSE_SEARCH error:', err);
+        sendResponse({ instructors: [] } satisfies CourseSearchResponse);
+      }
+    })();
+    return true;
+  }
+
+  return false;
 });
