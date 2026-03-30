@@ -6,3 +6,4 @@ __pycache__/
 tasks/
 tests/
 .tamu_chrome_profile/
+.playwright-mcp/
