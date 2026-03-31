@@ -36,6 +36,7 @@ class ProfessorResult(BaseModel):
     pct_d: float
     pct_f: float
     official_recent: Optional[PDFGradeRow] = None  # from TAMU grade report PDF
+    rmp_rating: Optional[float] = None
 
 
 class CourseReport(BaseModel):

@@ -22,6 +22,7 @@ from models import CourseReport, SectionInfo
 from schedule import select_sections, reset_sections
 from howdy import get_sections_for_courses
 from scraper import fetch_course
+from rmp import get_rmp_rating
 
 
 def parse_courses(args: list[str]) -> list[tuple[str, str]]:
@@ -33,6 +34,8 @@ def parse_courses(args: list[str]) -> list[tuple[str, str]]:
 
 def build_report(dept: str, number: str, sections: list[SectionInfo]) -> CourseReport:
     professors = fetch_course(dept, number)
+    for p in professors:
+        p.rmp_rating = get_rmp_rating(p.name)
     current_instructors = sorted({s.instructor_name for s in sections if s.instructor_name != "TBA"})
     return CourseReport(
         dept=dept,
@@ -117,10 +120,11 @@ def format_report(report: CourseReport) -> str:
             star = "  "
             data_note = f"  ⚠ limited data ({sem_count} sem)" if low_data else ""
 
+        rmp_str = f"RMP {prof.rmp_rating:.1f}" if prof.rmp_rating is not None else "RMP N/A"
         lines.append(
             f"{star}{instr_name}   GPA {prof.avg_gpa:.2f} | "
             f"A: {prof.pct_a:.1f}%  B: {prof.pct_b:.1f}%  "
-            f"[{sem_count} sem, {most_recent}]{data_note}"
+            f"{rmp_str}  [{sem_count} sem, {most_recent}]{data_note}"
         )
         for s in sorted(by_instructor[instr_name], key=lambda x: x.section_number):
             lines.append(_fmt_section(s))
