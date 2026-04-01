@@ -16,16 +16,6 @@ class SectionInfo(BaseModel):
     instructor_name: str  # "Last, First" from schedule builder
 
 
-class PDFGradeRow(BaseModel):
-    semester: str   # e.g. "Fall 2025"
-    gpa: float
-    pct_a: float
-    pct_b: float
-    pct_c: float
-    pct_d: float
-    pct_f: float
-
-
 class ProfessorResult(BaseModel):
     name: str
     semesters: List[str]
@@ -35,7 +25,6 @@ class ProfessorResult(BaseModel):
     pct_c: float
     pct_d: float
     pct_f: float
-    official_recent: Optional[PDFGradeRow] = None  # from TAMU grade report PDF
     rmp_rating: Optional[float] = None
 
 

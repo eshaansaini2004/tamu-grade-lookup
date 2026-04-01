@@ -64,7 +64,6 @@ python3 lookup.py --out report.txt CSCE 221 ENGL 210
 | `rmp.py` | Rate My Professors ratings via GraphQL API |
 | `schedule.py` | Playwright automation for Howdy section selection |
 | `auth.py` | Per-user browser sessions, Duo MFA handling |
-| `pdf_grades.py` | Parses official TAMU grade distribution PDFs |
 | `models.py` | Pydantic data models |
 
 ## Notes

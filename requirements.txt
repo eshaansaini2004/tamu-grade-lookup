@@ -2,5 +2,4 @@ requests
 beautifulsoup4
 pydantic
 playwright
-pdfplumber
 python-dotenv
