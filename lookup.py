@@ -82,7 +82,7 @@ def format_report(report: CourseReport) -> str:
     lines = [f"\n{'━' * 42}", f"  {report.dept} {report.number}", f"{'━' * 42}"]
 
     if not report.sections:
-        lines.append("  No Fall 2026 sections found.")
+        lines.append("  No sections found.")
         lines.append("")
         return "\n".join(lines)
 
@@ -219,7 +219,7 @@ def main() -> None:
         sections_data = {}
 
     # Step 2: anex.us historical data — parallel across courses
-    with ThreadPoolExecutor(max_workers=min(len(courses), 4)) as ex:
+    with ThreadPoolExecutor(max_workers=max(1, min(len(courses), 4))) as ex:
         futs = [
             ex.submit(build_report, dept, number, sections_data.get(f"{dept} {number}", []))
             for dept, number in courses
