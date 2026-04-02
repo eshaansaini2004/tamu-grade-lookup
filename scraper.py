@@ -1,14 +1,43 @@
 from __future__ import annotations
 
+import json
 import sys
 import time
 from collections import defaultdict
+from pathlib import Path
+
+import threading
 
 import requests
 
 from models import ProfessorResult
 
 _cache: dict[tuple[str, str], list[ProfessorResult]] = {}
+_lock = threading.Lock()
+
+CACHE_DIR = Path.home() / ".tamu_grade_cache"
+GRADE_TTL = 7 * 24 * 3600  # 7 days
+
+
+def _disk_path(dept: str, number: str) -> Path:
+    return CACHE_DIR / f"grades_{dept.upper()}_{number}.json"
+
+
+def _load_disk(dept: str, number: str) -> list[ProfessorResult] | None:
+    p = _disk_path(dept, number)
+    if not p.exists():
+        return None
+    if time.time() - p.stat().st_mtime > GRADE_TTL:
+        return None
+    try:
+        return [ProfessorResult(**r) for r in json.loads(p.read_text())]
+    except Exception:
+        return None
+
+
+def _save_disk(dept: str, number: str, profs: list[ProfessorResult]) -> None:
+    CACHE_DIR.mkdir(exist_ok=True)
+    _disk_path(dept, number).write_text(json.dumps([p.model_dump() for p in profs]))
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; tamu-grade-lookup/1.0)"
@@ -18,8 +47,15 @@ HEADERS = {
 def fetch_course(dept: str, number: str) -> list[ProfessorResult]:
     """Return professor list for a course; empty list if no data found."""
     key = (dept.upper(), number)
-    if key in _cache:
-        return _cache[key]
+    with _lock:
+        if key in _cache:
+            return _cache[key]
+
+    cached = _load_disk(dept, number)
+    if cached is not None:
+        with _lock:
+            _cache[key] = cached
+        return cached
 
     data = _fetch_anex(dept, number)
     if data is None:
@@ -28,7 +64,9 @@ def fetch_course(dept: str, number: str) -> list[ProfessorResult]:
         print(f"No data found for {dept} {number}", file=sys.stderr)
         return []
 
-    _cache[key] = data
+    with _lock:
+        _cache[key] = data
+    _save_disk(dept, number, data)
     return data
 
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import urllib3
@@ -34,8 +36,11 @@ def parse_courses(args: list[str]) -> list[tuple[str, str]]:
 
 def build_report(dept: str, number: str, sections: list[SectionInfo]) -> CourseReport:
     professors = fetch_course(dept, number)
-    for p in professors:
-        p.rmp_rating = get_rmp_rating(p.name)
+    if professors:
+        with ThreadPoolExecutor(max_workers=min(len(professors), 6)) as ex:
+            ratings = list(ex.map(get_rmp_rating, [p.name for p in professors]))
+        for p, r in zip(professors, ratings):
+            p.rmp_rating = r
     current_instructors = sorted({s.instructor_name for s in sections if s.instructor_name != "TBA"})
     return CourseReport(
         dept=dept,
@@ -82,7 +87,6 @@ def format_report(report: CourseReport) -> str:
         return "\n".join(lines)
 
     # Group sections by instructor
-    from collections import defaultdict
     by_instructor: dict[str, list] = defaultdict(list)
     for s in report.sections:
         by_instructor[s.instructor_name].append(s)
@@ -214,17 +218,20 @@ def main() -> None:
         print(f"ERROR: Howdy API failed — {e}", file=sys.stderr)
         sections_data = {}
 
-    # Step 2: anex.us historical data
-    reports: list[CourseReport] = []
-    for dept, number in courses:
-        key = f"{dept} {number}"
-        reports.append(build_report(dept, number, sections_data.get(key, [])))
+    # Step 2: anex.us historical data — parallel across courses
+    with ThreadPoolExecutor(max_workers=min(len(courses), 4)) as ex:
+        futs = [
+            ex.submit(build_report, dept, number, sections_data.get(f"{dept} {number}", []))
+            for dept, number in courses
+        ]
+        reports: list[CourseReport] = [f.result() for f in futs]
 
     # Step 3: Output
     if args.json:
         out = json.dumps([r.model_dump() for r in reports], indent=2)
         if args.out:
-            open(args.out, "w").write(out)
+            with open(args.out, "w") as f:
+                f.write(out)
         else:
             print(out)
         return
@@ -233,7 +240,8 @@ def main() -> None:
     body = header + "".join(format_report(r) for r in reports) + "\n"
 
     if args.out:
-        open(args.out, "w").write(body)
+        with open(args.out, "w") as f:
+            f.write(body)
         print(f"Report written to {args.out}", file=sys.stderr)
     else:
         print(body)
