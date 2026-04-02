@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -12,9 +14,27 @@ from playwright.sync_api import sync_playwright
 load_dotenv()
 
 SCHEDULE_BUILDER_URL = "https://tamu.collegescheduler.com/"
-CHROME_EXECUTABLE = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 TOOL_PROFILE_DIR = Path.home() / ".tamu_chrome_profile"
 PROFILES_DIR = Path.home() / ".tamu_profiles"
+
+
+def _find_chrome() -> str | None:
+    """
+    Return Chrome/Chromium executable path for the current OS.
+    Returns None to let Playwright fall back to its bundled Chromium.
+    """
+    if platform.system() == "Darwin":
+        mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        return mac if Path(mac).exists() else None
+    # Linux: check PATH first, then common fixed locations
+    for name in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]:
+        found = shutil.which(name)
+        if found:
+            return found
+    for path in ["/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"]:
+        if Path(path).exists():
+            return path
+    return None
 
 
 def get_context(
@@ -35,7 +55,7 @@ def get_context(
     pw = sync_playwright().start()
     ctx = pw.chromium.launch_persistent_context(
         str(profile_dir),
-        executable_path=CHROME_EXECUTABLE,
+        executable_path=_find_chrome(),
         headless=headless,
         args=["--no-first-run", "--no-default-browser-check", "--password-store=basic"],
         ignore_default_args=["--enable-automation"],
