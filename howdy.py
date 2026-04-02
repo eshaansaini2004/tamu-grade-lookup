@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -23,13 +24,15 @@ HOWDY_TTL = 3600  # 1 hour — sections change daily but not minute-to-minute
 # In-memory cache: term_code -> list of raw API rows
 _section_cache: dict[str, list[dict]] = {}
 _term_code_cache: Optional[str] = None
+_lock = threading.Lock()
 
 
 def _get_term_code() -> str:
     """Return the term code for the current/upcoming Fall semester."""
     global _term_code_cache
-    if _term_code_cache:
-        return _term_code_cache
+    with _lock:
+        if _term_code_cache:
+            return _term_code_cache
 
     resp = requests.get(f"{HOWDY_BASE}/all-terms", headers=HEADERS, timeout=10)
     resp.raise_for_status()
@@ -45,20 +48,23 @@ def _get_term_code() -> str:
 
     # Sort by code descending — highest code = most upcoming
     fall_cs.sort(key=lambda t: t["STVTERM_CODE"], reverse=True)
-    _term_code_cache = fall_cs[0]["STVTERM_CODE"]
+    with _lock:
+        _term_code_cache = fall_cs[0]["STVTERM_CODE"]
     print(f"  Howdy term: {fall_cs[0]['STVTERM_DESC']} ({_term_code_cache})", file=sys.stderr)
     return _term_code_cache
 
 
 def _fetch_all_sections(term_code: str) -> list[dict]:
     """Fetch every section for the term. Disk-cached for 1h, in-memory after that."""
-    if term_code in _section_cache:
-        return _section_cache[term_code]
+    with _lock:
+        if term_code in _section_cache:
+            return _section_cache[term_code]
 
     cache_file = CACHE_DIR / f"howdy_{term_code}.json"
     if cache_file.exists() and time.time() - cache_file.stat().st_mtime < HOWDY_TTL:
         rows = json.loads(cache_file.read_text())
-        _section_cache[term_code] = rows
+        with _lock:
+            _section_cache[term_code] = rows
         print(f"  Loaded {len(rows)} sections from cache", file=sys.stderr)
         return rows
 
@@ -76,8 +82,11 @@ def _fetch_all_sections(term_code: str) -> list[dict]:
     print(f"  Got {len(rows)} sections in {elapsed:.1f}s", file=sys.stderr)
 
     CACHE_DIR.mkdir(exist_ok=True)
-    cache_file.write_text(json.dumps(rows))
-    _section_cache[term_code] = rows
+    tmp = cache_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows))
+    tmp.rename(cache_file)
+    with _lock:
+        _section_cache[term_code] = rows
     return rows
 
 

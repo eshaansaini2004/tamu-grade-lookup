@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import sys
+from datetime import date
 from urllib.parse import quote
 
 from playwright.sync_api import BrowserContext
@@ -8,8 +10,43 @@ from playwright.sync_api import BrowserContext
 from models import SectionInfo
 
 BASE = "https://tamu.collegescheduler.com"
+
+# Set on first browser session by _switch_to_upcoming_fall; fallback if detection fails
 TARGET_TERM = "Fall 2026 - College Station"
 TERM_ENCODED = quote(TARGET_TERM)
+
+
+# First month AFTER registration closes: fall reg ends Aug 31 → closes Sep 1, spring ends Jan 31 → closes Feb 1
+_REG_CLOSE_MONTH = {"spring": 2, "fall": 9}
+
+
+def _detect_registration_target(terms: list[dict]) -> str | None:
+    """
+    Pick the nearest Fall or Spring College Station term still open for registration.
+    Fall registration closes end of August, Spring closes end of January.
+    """
+    today = date.today()
+    candidates: list[tuple[date, str]] = []
+
+    for t in terms:
+        tid = t.get("id", "")
+        if "College Station" not in tid:
+            continue
+        m = re.search(r"\d{4}", tid)
+        if not m:
+            continue
+        year = int(m.group())
+        for season, close_month in _REG_CLOSE_MONTH.items():
+            if season in tid.lower():
+                reg_closes = date(year, close_month, 1)
+                if reg_closes > today:
+                    candidates.append((reg_closes, tid))
+                break
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
 
 
 def get_current_instructors(
@@ -21,7 +58,7 @@ def get_current_instructors(
     """
     page = ctx.new_page()
     try:
-        _switch_to_fall2026(page)
+        _switch_to_upcoming_fall(page)
         _ensure_courses_added(page, courses)
         return {
             f"{dept.upper()} {number}": _fetch_instructors(page, dept, number)
@@ -77,14 +114,14 @@ def _ensure_courses_added(page, courses: list[tuple[str, str]]) -> None:
             print(f"  Warning: failed to add {dept} {number} — {e}", file=sys.stderr)
 
 
-def _switch_to_fall2026(page) -> None:
+def _switch_to_upcoming_fall(page) -> None:
     """
-    Switch the schedule builder to Fall 2026.
-    Flow: goto term-selection → check radio → click Save.
-    Save updates React state to Fall 2026 without a hard reload.
+    Switch the schedule builder to the most upcoming Fall - College Station term.
+    Auto-detects the term from app-data on first call; falls back to TARGET_TERM.
     """
-    # Get whatever is the current active term to build the right URL
-    term_data = {}
+    global TARGET_TERM, TERM_ENCODED
+
+    captured = {}
 
     def capture(r):
         if r.url.endswith("/api/app-data"):
@@ -92,7 +129,8 @@ def _switch_to_fall2026(page) -> None:
                 d = r.json()
                 terms = d.get("terms", [])
                 if terms:
-                    term_data["current"] = terms[0]["id"]
+                    captured["current"] = terms[0]["id"]
+                    captured["all"] = terms
             except Exception:
                 pass
 
@@ -100,13 +138,18 @@ def _switch_to_fall2026(page) -> None:
     page.goto(f"{BASE}/", wait_until="networkidle", timeout=20000)
     page.remove_listener("response", capture)
 
-    current = term_data.get("current", "Full Yr Professional 2025-2026")
+    # Detect and lock in the target term once
+    if detected := _detect_registration_target(captured.get("all", [])):
+        if detected != TARGET_TERM:
+            TARGET_TERM = detected
+            TERM_ENCODED = quote(TARGET_TERM)
+
+    current = captured.get("current", "Full Yr Professional 2025-2026")
 
     if current == TARGET_TERM:
         print(f"  Already on {TARGET_TERM}", file=sys.stderr)
         return
 
-    # Navigate to term selection page and switch
     page.goto(f"{BASE}/terms/{quote(current)}", wait_until="networkidle", timeout=20000)
     page.wait_for_timeout(500)
     page.check(f'[id="{TARGET_TERM}"]')
@@ -127,7 +170,7 @@ def get_all_sections(
     """
     page = ctx.new_page()
     try:
-        _switch_to_fall2026(page)
+        _switch_to_upcoming_fall(page)
         _ensure_courses_added(page, courses)
         result = {}
         for dept, number in courses:
@@ -187,7 +230,7 @@ def select_sections(
     """
     page = ctx.new_page()
     try:
-        _switch_to_fall2026(page)
+        _switch_to_upcoming_fall(page)
         # Fetch term-data once and pass it in — avoids N redundant API calls
         resp = page.request.get(f"{BASE}/api/term-data/{TERM_ENCODED}", timeout=15000)
         if not resp.ok:
@@ -211,7 +254,7 @@ def reset_sections(
     """
     page = ctx.new_page()
     try:
-        _switch_to_fall2026(page)
+        _switch_to_upcoming_fall(page)
         resp = page.request.get(f"{BASE}/api/term-data/{TERM_ENCODED}", timeout=15000)
         if not resp.ok:
             print(f"  term-data failed: {resp.status}", file=sys.stderr)

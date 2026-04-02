@@ -37,7 +37,10 @@ def _load_disk(dept: str, number: str) -> list[ProfessorResult] | None:
 
 def _save_disk(dept: str, number: str, profs: list[ProfessorResult]) -> None:
     CACHE_DIR.mkdir(exist_ok=True)
-    _disk_path(dept, number).write_text(json.dumps([p.model_dump() for p in profs]))
+    target = _disk_path(dept, number)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps([p.model_dump() for p in profs]))
+    tmp.rename(target)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; tamu-grade-lookup/1.0)"
