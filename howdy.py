@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -15,6 +16,9 @@ from models import SectionInfo
 
 HOWDY_BASE = "https://howdyportal.tamu.edu/api"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; tamu-grade-lookup/1.0)"}
+
+CACHE_DIR = Path.home() / ".tamu_grade_cache"
+HOWDY_TTL = 3600  # 1 hour — sections change daily but not minute-to-minute
 
 # In-memory cache: term_code -> list of raw API rows
 _section_cache: dict[str, list[dict]] = {}
@@ -47,9 +51,16 @@ def _get_term_code() -> str:
 
 
 def _fetch_all_sections(term_code: str) -> list[dict]:
-    """Fetch every section for the term. Cached after first call."""
+    """Fetch every section for the term. Disk-cached for 1h, in-memory after that."""
     if term_code in _section_cache:
         return _section_cache[term_code]
+
+    cache_file = CACHE_DIR / f"howdy_{term_code}.json"
+    if cache_file.exists() and time.time() - cache_file.stat().st_mtime < HOWDY_TTL:
+        rows = json.loads(cache_file.read_text())
+        _section_cache[term_code] = rows
+        print(f"  Loaded {len(rows)} sections from cache", file=sys.stderr)
+        return rows
 
     print(f"  Fetching all sections from Howdy (term {term_code})...", file=sys.stderr)
     t0 = time.time()
@@ -64,6 +75,8 @@ def _fetch_all_sections(term_code: str) -> list[dict]:
     elapsed = time.time() - t0
     print(f"  Got {len(rows)} sections in {elapsed:.1f}s", file=sys.stderr)
 
+    CACHE_DIR.mkdir(exist_ok=True)
+    cache_file.write_text(json.dumps(rows))
     _section_cache[term_code] = rows
     return rows
 
