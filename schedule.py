@@ -188,9 +188,15 @@ def select_sections(
     page = ctx.new_page()
     try:
         _switch_to_fall2026(page)
+        # Fetch term-data once and pass it in — avoids N redundant API calls
+        resp = page.request.get(f"{BASE}/api/term-data/{TERM_ENCODED}", timeout=15000)
+        if not resp.ok:
+            print(f"  term-data failed: {resp.status}", file=sys.stderr)
+            return {course_key: [] for course_key, _, _ in selections}
+        term_data = resp.json()
         results = {}
         for course_key, instructor_query, sections in selections:
-            results[course_key] = _do_select_sections(page, course_key, instructor_query, sections)
+            results[course_key] = _do_select_sections(page, course_key, instructor_query, sections, term_data)
         return results
     finally:
         page.close()
@@ -242,22 +248,19 @@ def _do_reset_sections(page, course_key: str, course_id: str) -> None:
     print(f"  {course_key}: reset — all {len(checkboxes)} section(s) selected", file=sys.stderr)
 
 
-def _do_select_sections(page, course_key: str, instructor_query: str, sections: list[SectionInfo]) -> list[SectionInfo]:
+def _do_select_sections(page, course_key: str, instructor_query: str, sections: list[SectionInfo], term_data: dict) -> list[SectionInfo]:
     query = instructor_query.lower()
 
-    target = [s for s in sections if _last_name_s(s.instructor_name).startswith(query)]
+    # Exclude TBA so "tba" can't accidentally match everything
+    target = [s for s in sections if s.instructor_name != "TBA" and _last_name_s(s.instructor_name).startswith(query)]
     if not target:
-        print(f"  No sections found for instructor matching '{instructor_query}'", file=sys.stderr)
+        empty_reason = "no sections in Howdy" if not sections else f"no instructor matching '{instructor_query}'"
+        print(f"  {course_key}: {empty_reason}", file=sys.stderr)
         return []
 
     target_crns = {s.reg_number for s in target}
 
-    # Get course internal ID from term-data
-    resp = page.request.get(f"{BASE}/api/term-data/{TERM_ENCODED}", timeout=15000)
-    if not resp.ok:
-        print(f"  term-data failed: {resp.status}", file=sys.stderr)
-        return []
-    data = resp.json()
+    data = term_data
     dept, number = course_key.split(" ", 1)
     course_obj = next(
         (c for c in data.get("courses", []) if c["subjectId"] == dept.upper() and c["number"] == number),
