@@ -51,10 +51,12 @@ def _run_login(user_id: str, code_queue: queue.Queue) -> None:
 
 def _run_lookup(courses: list[tuple[str, str]]) -> str:
     sections_data = get_sections_for_courses(courses)
-    reports = [
-        build_report(dept, number, sections_data.get(f"{dept} {number}", []))
-        for dept, number in courses
-    ]
+    with ThreadPoolExecutor(max_workers=max(1, min(len(courses), 4))) as ex:
+        futs = [
+            ex.submit(build_report, dept, number, sections_data.get(f"{dept} {number}", []))
+            for dept, number in courses
+        ]
+        reports = [f.result() for f in futs]
     return "".join(format_report(r) for r in reports)
 
 
@@ -144,7 +146,7 @@ async def login(interaction: discord.Interaction):
     code_queue: queue.Queue = queue.Queue()
 
     await interaction.response.defer(thinking=True)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     login_future = loop.run_in_executor(executor, _run_login, user_id, code_queue)
 
     # Wait for the Duo code to be scraped from the browser
@@ -192,7 +194,7 @@ async def lookup(interaction: discord.Interaction, courses: str):
         await interaction.followup.send(f"Error: {e}")
         return
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(executor, _run_lookup, course_list)
     except Exception as e:
@@ -219,7 +221,7 @@ async def select(interaction: discord.Interaction, selections: str):
         await interaction.followup.send(f"Error: {e}")
         return
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(executor, _run_select, user_id, triplets)
     except Exception as e:
@@ -243,7 +245,7 @@ async def reset(interaction: discord.Interaction, courses: str):
         await interaction.followup.send(f"Error: {e}")
         return
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(executor, _run_reset, user_id, course_list)
     except Exception as e:
