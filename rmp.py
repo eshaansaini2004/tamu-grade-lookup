@@ -5,6 +5,7 @@ Uses the public RMP GraphQL API (no auth needed for basic search).
 from __future__ import annotations
 
 import sys
+import threading
 from typing import Optional
 
 import requests
@@ -38,6 +39,7 @@ query SearchTeacher($text: String!, $schoolID: ID!) {
 
 # Simple in-memory cache: last_name -> rating or None
 _cache: dict[str, Optional[float]] = {}
+_lock = threading.Lock()
 
 
 def get_rmp_rating(prof_name: str) -> Optional[float]:
@@ -50,8 +52,9 @@ def get_rmp_rating(prof_name: str) -> Optional[float]:
     first = parts[1].strip() if len(parts) > 1 else ""
 
     cache_key = prof_name.lower()
-    if cache_key in _cache:
-        return _cache[cache_key]
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
 
     try:
         resp = requests.post(
@@ -64,11 +67,13 @@ def get_rmp_rating(prof_name: str) -> Optional[float]:
         edges = resp.json()["data"]["newSearch"]["teachers"]["edges"]
     except Exception as e:
         print(f"  RMP lookup failed for {prof_name}: {e}", file=sys.stderr)
-        _cache[cache_key] = None
+        with _lock:
+            _cache[cache_key] = None
         return None
 
     if not edges:
-        _cache[cache_key] = None
+        with _lock:
+            _cache[cache_key] = None
         return None
 
     # Find best match: prefer exact last name match with most ratings
@@ -78,10 +83,12 @@ def get_rmp_rating(prof_name: str) -> Optional[float]:
         if e["node"]["lastName"].lower() == last_lower and e["node"]["numRatings"] > 0
     ]
     if not candidates:
-        _cache[cache_key] = None
+        with _lock:
+            _cache[cache_key] = None
         return None
 
     best = max(candidates, key=lambda n: n["numRatings"])
     rating = float(best["avgRating"]) if best["avgRating"] else None
-    _cache[cache_key] = rating
+    with _lock:
+        _cache[cache_key] = rating
     return rating
