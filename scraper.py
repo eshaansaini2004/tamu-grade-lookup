@@ -62,8 +62,6 @@ def fetch_course(dept: str, number: str) -> list[ProfessorResult]:
 
     data = _fetch_anex(dept, number)
     if data is None:
-        data = _fetch_aggiegrade(dept, number)
-    if data is None:
         print(f"No data found for {dept} {number}", file=sys.stderr)
         return []
 
@@ -89,28 +87,6 @@ def _fetch_anex(dept: str, number: str) -> list[ProfessorResult] | None:
         return None
 
     classes = payload.get("classes")
-    if not classes:
-        return None
-
-    time.sleep(0.5)
-    return _parse_rows(classes)
-
-
-def _fetch_aggiegrade(dept: str, number: str) -> list[ProfessorResult] | None:
-    try:
-        resp = requests.get(
-            "https://aggiegrade.com/api/grades",
-            params={"dept": dept.upper(), "course": number},
-            headers=HEADERS,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-    except Exception as e:
-        print(f"aggiegrade.com request failed: {e}", file=sys.stderr)
-        return None
-
-    classes = payload.get("classes") or payload.get("data")
     if not classes:
         return None
 
