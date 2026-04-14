@@ -1,10 +1,11 @@
 // Service worker — all external API calls live here so host_permissions bypass CORS.
 
-import { ANEX_URL, RMP_URL, RMP_SCHOOL_ID, RMP_AUTH, RMP_QUERY, GRADE_TTL_MS, RMP_TTL_MS } from '../shared/constants';
-import { parseGradeRows } from '../shared/gradeUtils';
+import { GRADES_API, RMP_URL, RMP_SCHOOL_ID, RMP_AUTH, RMP_QUERY, GRADE_TTL_MS, RMP_TTL_MS } from '../shared/constants';
 import { matchProf, pickBestRmp, parseName } from '../shared/nameMatch';
-import type { GradeData, RmpData } from '../shared/types';
-import type { LookupResponse, CourseSearchResponse, RankedInstructor } from '../shared/messages';
+import type { GradeData, RmpData, ApiSection } from '../shared/types';
+import type { LookupResponse, CourseSearchResponse, RankedInstructor, FetchSectionsResponse, AddCourseResponse } from '../shared/messages';
+
+const SCHEDULER_BASE = 'https://tamu.collegescheduler.com';
 
 // ─── cache ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +23,10 @@ async function cacheSet<T>(key: string, data: T, ttl: number): Promise<void> {
   await chrome.storage.local.set({ [key]: { data, expires: Date.now() + ttl } });
 }
 
-// ─── anex.us ──────────────────────────────────────────────────────────────────
+// ─── grades.adibarra.com ──────────────────────────────────────────────────────
+
+interface AdibarraProf { type: 3; id: number; first: string; last: string }
+interface AdibarraGrade { type: 4; prof: number; grades: Record<string, number>; gpa: number; year: number }
 
 async function fetchGrades(dept: string, number: string): Promise<Record<string, GradeData> | null> {
   const key = `grade_${dept.toUpperCase()}_${number}`;
@@ -31,20 +35,61 @@ async function fetchGrades(dept: string, number: string): Promise<Record<string,
 
   let profs: Record<string, GradeData> | null = null;
   try {
-    const body = new URLSearchParams({ dept: dept.toUpperCase(), number: String(number) });
-    const res = await fetch(ANEX_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
-    if (!res.ok) throw new Error(`anex.us ${res.status}`);
-    const json = await res.json() as { classes?: unknown[] };
-    if (json.classes?.length) profs = parseGradeRows(json.classes as Parameters<typeof parseGradeRows>[0]);
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 8000);
+    const res = await fetch(`${GRADES_API}?course=${dept.toUpperCase()}-${number}`, { signal: ac.signal });
+    if (!res.ok) throw new Error(`adibarra ${res.status}`);
+    const json = await res.json() as { data: (AdibarraProf | AdibarraGrade | unknown)[] };
+    const items = json.data ?? [];
+
+    // Build prof id → "LAST F" name map
+    const profMap = new Map<number, string>();
+    for (const item of items) {
+      const p = item as AdibarraProf;
+      if (p.type === 3) profMap.set(p.id, `${p.last} ${p.first}`.trim());
+    }
+
+    // Aggregate grade rows by prof
+    const byProf = new Map<number, { a: number; b: number; c: number; d: number; f: number; gpas: number[] }>();
+    for (const item of items) {
+      const g = item as AdibarraGrade;
+      if (g.type !== 4) continue;
+      if (!byProf.has(g.prof)) byProf.set(g.prof, { a: 0, b: 0, c: 0, d: 0, f: 0, gpas: [] });
+      const p = byProf.get(g.prof)!;
+      // Grade code keys: 1=A, 4=B, 7=C, 10=D, 12=F
+      p.a += g.grades['1'] ?? 0;
+      p.b += g.grades['4'] ?? 0;
+      p.c += g.grades['7'] ?? 0;
+      p.d += g.grades['10'] ?? 0;
+      p.f += g.grades['12'] ?? 0;
+      if (g.gpa > 0) p.gpas.push(g.gpa);
+    }
+
+    if (byProf.size > 0) {
+      profs = {};
+      for (const [profId, d] of byProf) {
+        const name = profMap.get(profId);
+        if (!name) continue;
+        const total = d.a + d.b + d.c + d.d + d.f || 1;
+        const avgGpa = d.gpas.length ? d.gpas.reduce((s, x) => s + x, 0) / d.gpas.length : 0;
+        const key = name.toLowerCase();
+        profs[key] = {
+          name,
+          avgGpa: Math.round(avgGpa * 100) / 100,
+          pctA: Math.round((d.a / total) * 100),
+          pctB: Math.round((d.b / total) * 100),
+          pctC: Math.round((d.c / total) * 100),
+          pctD: Math.round((d.d / total) * 100),
+          pctF: Math.round((d.f / total) * 100),
+          semCount: d.gpas.length,
+        };
+      }
+    }
   } catch (e) {
-    console.warn('anex.us fetch failed:', (e as Error).message);
+    console.warn('grades fetch failed:', (e as Error).message);
   }
 
-  await cacheSet(key, profs, GRADE_TTL_MS);
+  if (profs !== null) await cacheSet(key, profs, GRADE_TTL_MS);
   return profs;
 }
 
@@ -61,10 +106,13 @@ async function fetchRmp(instructorName: string, dept: string): Promise<RmpData |
 
   let result: RmpData | null = null;
   try {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 5000);
     const res = await fetch(RMP_URL, {
       method: 'POST',
       headers: { Authorization: RMP_AUTH, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: RMP_QUERY, variables: { text: searchText, schoolID: RMP_SCHOOL_ID } }),
+      signal: ac.signal,
     });
     if (res.ok) {
       const json = await res.json() as {
@@ -80,6 +128,26 @@ async function fetchRmp(instructorName: string, dept: string): Promise<RmpData |
 
   await cacheSet(cacheKey, result, RMP_TTL_MS);
   return result;
+}
+
+// ─── XSRF token helper ───────────────────────────────────────────────────────
+
+// Fetches a fresh X-XSRF-Token from the page HTML. Background SW can do this
+// because host_permissions lets it make credentialed GETs. Falls back to the
+// value cached by the content script in chrome.storage.local.
+async function fetchXsrfToken(): Promise<string | null> {
+  try {
+    const res = await fetch(`${SCHEDULER_BASE}/entry`, { credentials: 'include' });
+    if (res.ok) {
+      const html = await res.text();
+      const m = html.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/i)
+             ?? html.match(/value="([^"]+)"[^>]*name="__RequestVerificationToken"/i);
+      if (m?.[1]) return m[1];
+    }
+  } catch { /* fall through to cached */ }
+
+  const stored = await chrome.storage.local.get('rfToken');
+  return (stored.rfToken as string | undefined) ?? null;
 }
 
 // ─── message handler ──────────────────────────────────────────────────────────
@@ -131,6 +199,80 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } catch (err) {
         console.error('COURSE_SEARCH error:', err);
         sendResponse({ instructors: [] } satisfies CourseSearchResponse);
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'FETCH_SECTIONS') {
+    const { dept, number, term } = msg as { type: 'FETCH_SECTIONS'; dept: string; number: string; term: string };
+    (async () => {
+      try {
+        const url = `${SCHEDULER_BASE}/api/terms/${encodeURIComponent(term)}/subjects/${dept.toUpperCase()}/courses/${number}/regblocks`;
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) { sendResponse({ sections: [] } satisfies FetchSectionsResponse); return; }
+        const data = await res.json() as { sections?: ApiSection[] };
+        sendResponse({ sections: data.sections ?? [] } satisfies FetchSectionsResponse);
+      } catch {
+        sendResponse({ sections: [] } satisfies FetchSectionsResponse);
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ADD_COURSE_TO_BUILDER') {
+    const { dept, number, term, sectionCrns } = msg as {
+      type: 'ADD_COURSE_TO_BUILDER';
+      dept: string;
+      number: string;
+      term: string;
+      sectionCrns: string[];
+    };
+    (async () => {
+      try {
+        // The Angular bundle sends X-XSRF-Token (not RF-Token) with the value from
+        // the hidden __RequestVerificationToken input. GET requests work fine without it;
+        // POSTs require it for ASP.NET anti-forgery validation.
+        const xsrfToken = await fetchXsrfToken();
+
+        const termEnc = encodeURIComponent(term);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        };
+        if (xsrfToken) headers['X-XSRF-Token'] = xsrfToken;
+
+        const res = await fetch(`${SCHEDULER_BASE}/api/terms/${termEnc}/desiredcourses`, {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null }),
+        });
+
+        if (!res.ok) { sendResponse({ ok: false } satisfies AddCourseResponse); return; }
+
+        const course = await res.json() as { id?: number };
+        const courseId = course.id;
+
+        // Best-effort: lock to this prof's sections
+        if (courseId && sectionCrns.length) {
+          await Promise.all(
+            sectionCrns.map((crn) =>
+              fetch(`${SCHEDULER_BASE}/api/terms/${termEnc}/desiredcourses/${courseId}/lock`, {
+                method: 'POST',
+                credentials: 'include',
+                headers,
+                body: JSON.stringify({ registrationNumber: crn }),
+              }).catch(() => {})
+            )
+          );
+        }
+
+        sendResponse({ ok: true } satisfies AddCourseResponse);
+      } catch (e) {
+        console.error('ADD_COURSE_TO_BUILDER error:', e);
+        sendResponse({ ok: false } satisfies AddCourseResponse);
       }
     })();
     return true;

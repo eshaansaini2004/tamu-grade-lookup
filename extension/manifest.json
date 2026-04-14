@@ -6,7 +6,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "*://tamu.collegescheduler.com/*",
-    "*://anex.us/*",
+    "*://grades.adibarra.com/*",
     "*://www.ratemyprofessors.com/*"
   ],
   "content_scripts": [

@@ -1,11 +1,13 @@
-import type { GradeData, RmpData } from './types';
+import type { GradeData, RmpData, ApiSection } from './types';
 
 export type Message =
   | { type: 'LOOKUP'; dept: string; number: string; instructorName: string }
   | { type: 'FETCH_SECTION_TIMES'; crn: string; termCode: string }
   | { type: 'OPEN_CALENDAR' }
   | { type: 'GET_PAGE_STATS' }
-  | { type: 'COURSE_SEARCH'; dept: string; number: string };
+  | { type: 'COURSE_SEARCH'; dept: string; number: string }
+  | { type: 'FETCH_SECTIONS'; dept: string; number: string; term: string }
+  | { type: 'ADD_COURSE_TO_BUILDER'; dept: string; number: string; term: string; sectionCrns: string[] };
 
 export interface RankedInstructor {
   name: string;
@@ -61,6 +63,53 @@ export function sendLookup(
           return;
         }
         resolve(response);
+      },
+    );
+  });
+}
+
+export interface FetchSectionsResponse {
+  sections: ApiSection[];
+}
+
+export function sendFetchSections(dept: string, number: string, term: string): Promise<ApiSection[]> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve([]), 10_000);
+    chrome.runtime.sendMessage(
+      { type: 'FETCH_SECTIONS', dept, number, term } satisfies Message,
+      (response: FetchSectionsResponse) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError || !response) {
+          resolve([]);
+          return;
+        }
+        resolve(response.sections ?? []);
+      },
+    );
+  });
+}
+
+export interface AddCourseResponse {
+  ok: boolean;
+}
+
+export function sendAddCourseToBuilder(
+  dept: string,
+  number: string,
+  term: string,
+  sectionCrns: string[],
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 12_000);
+    chrome.runtime.sendMessage(
+      { type: 'ADD_COURSE_TO_BUILDER', dept, number, term, sectionCrns } satisfies Message,
+      (response: AddCourseResponse) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError || !response) {
+          resolve(false);
+          return;
+        }
+        resolve(response.ok ?? false);
       },
     );
   });
