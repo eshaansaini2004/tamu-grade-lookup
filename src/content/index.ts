@@ -429,35 +429,47 @@ scanNode(document);
 // ─── popup message handler ────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type !== 'GET_PAGE_STATS') return false;
+  if (msg.type === 'GET_PAGE_STATS') {
+    let gpaMin: number | null = null;
+    let gpaMax: number | null = null;
+    let instructorCount = 0;
 
-  let gpaMin: number | null = null;
-  let gpaMax: number | null = null;
-  let instructorCount = 0;
-
-  for (const instructors of courseInstructors.values()) {
-    for (const { gradeData } of instructors.values()) {
-      instructorCount++;
-      if (gradeData != null) {
-        gpaMin = gpaMin == null ? gradeData.avgGpa : Math.min(gpaMin, gradeData.avgGpa);
-        gpaMax = gpaMax == null ? gradeData.avgGpa : Math.max(gpaMax, gradeData.avgGpa);
+    for (const instructors of courseInstructors.values()) {
+      for (const { gradeData } of instructors.values()) {
+        instructorCount++;
+        if (gradeData != null) {
+          gpaMin = gpaMin == null ? gradeData.avgGpa : Math.min(gpaMin, gradeData.avgGpa);
+          gpaMax = gpaMax == null ? gradeData.avgGpa : Math.max(gpaMax, gradeData.avgGpa);
+        }
       }
     }
+
+    sendResponse({
+      sectionCount: sectionGrades.size,
+      instructorCount,
+      courseCount: courseInstructors.size,
+      gpaMin,
+      gpaMax,
+    } satisfies PageStats);
+
+    return true;
   }
 
-  sendResponse({
-    sectionCount: sectionGrades.size,
-    instructorCount,
-    courseCount: courseInstructors.size,
-    gpaMin,
-    gpaMax,
-  } satisfies PageStats);
-
-  return true;
+  return false;
 });
 
 console.log('[TRP] content script loaded on', location.href);
 console.log('[TRP] instructor <li>s found on initial scan:', findInstructorLis(document).length);
+
+// Store session data so popup can make authenticated API calls without the page open
+(function storeSessionData() {
+  const m = location.pathname.match(/\/terms\/([^/]+)\//);
+  if (m) chrome.storage.local.set({ currentTerm: decodeURIComponent(m[1]) });
+
+  // RF-Token is ASP.NET's anti-forgery token — background SW includes it on POSTs
+  const el = document.querySelector<HTMLInputElement>('input[name="__RequestVerificationToken"]');
+  if (el?.value) chrome.storage.local.set({ rfToken: el.value });
+})();
 
 // ─── floating course search panel ─────────────────────────────────────────────
 

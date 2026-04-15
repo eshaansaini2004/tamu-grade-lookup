@@ -1,31 +1,11 @@
 import { createElement, useEffect, useRef, useState } from 'react';
 import { sendCourseSearch } from '../../shared/messages';
 import type { RankedInstructor } from '../../shared/messages';
-import type { MeetingTime, SavedSection } from '../../shared/types';
+import type { ApiMeeting, ApiSection, MeetingTime, SavedSection } from '../../shared/types';
 import { saveSection } from '../../shared/storage';
 import { parseMeetingFromApi } from '../../shared/conflictDetection';
 
-// ─── Schedule Builder API types ───────────────────────────────────────────────
-
-interface ApiMeeting {
-  daysRaw: string;
-  startTime: number;
-  endTime: number;
-  location?: string;
-  meetingType?: string;
-}
-
-interface ApiSection {
-  registrationNumber: string;
-  sectionNumber?: string;
-  credits?: number;
-  instructor: { name: string; id?: string }[];
-  meetings: ApiMeeting[];
-}
-
-interface ApiSectionData {
-  sections: ApiSection[];
-}
+const SCHEDULER_BASE = 'https://tamu.collegescheduler.com';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -34,15 +14,34 @@ function getTerm(): string {
   return m ? decodeURIComponent(m[1]) : 'Spring 2026 - College Station';
 }
 
+async function addCourseToBuilder(dept: string, number: string): Promise<boolean> {
+  const term = encodeURIComponent(getTerm());
+  try {
+    const res = await fetch(`${SCHEDULER_BASE}/api/terms/${term}/desiredcourses`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchSections(dept: string, number: string): Promise<ApiSection[]> {
   const term = encodeURIComponent(getTerm());
-  const res = await fetch(
-    `/api/terms/${term}/subjects/${dept.toUpperCase()}/courses/${number}/regblocks`,
-    { credentials: 'include' }
-  );
-  if (!res.ok) return [];
-  const data = (await res.json()) as ApiSectionData;
-  return data.sections ?? [];
+  try {
+    const res = await fetch(
+      `${SCHEDULER_BASE}/api/terms/${term}/subjects/${dept.toUpperCase()}/courses/${number}/regblocks`,
+      { credentials: 'include' }
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { sections?: ApiSection[] };
+    return data.sections ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function minToTime(min: number): string {
@@ -172,6 +171,7 @@ function InstructorCard({
   savedCrns: Set<string>;
   onSave: (crn: string) => void;
 }) {
+  const [addState, setAddState] = useState<'idle' | 'loading' | 'done' | 'err'>('idle');
   const { gradeData, rmpData } = instructor;
   // Match by last name exact word — avoids "Smith" matching "Smithson"
   const lastName = instructor.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
@@ -181,6 +181,14 @@ function InstructorCard({
       return iLast === lastName;
     })
   );
+
+  async function handleAddToBuilder() {
+    setAddState('loading');
+    const ok = await addCourseToBuilder(dept, number);
+    setAddState(ok ? 'done' : 'err');
+  }
+
+  const addLabel = addState === 'loading' ? '…' : addState === 'done' ? 'Added ✓' : addState === 'err' ? 'Failed' : '+ Builder';
 
   return createElement(
     'div',
@@ -193,22 +201,37 @@ function InstructorCard({
         marginBottom: 10,
       },
     },
-    // Header: name + GPA
+    // Header: name + GPA + Add to Builder
     createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 } },
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6 } },
       createElement('div', {
         style: { fontSize: 12, fontWeight: 700, color: '#f9fafb', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       }, instructor.name),
       createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'baseline', gap: 8, flexShrink: 0, marginLeft: 8 } },
+        { style: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 } },
         createElement('div', {
           style: { fontSize: 16, fontWeight: 800, color: gpaColor(gradeData.avgGpa) },
         }, gradeData.avgGpa.toFixed(2)),
         rmpData && createElement('div', {
           style: { fontSize: 11, color: '#9ca3af' },
-        }, `RMP ${rmpData.rating.toFixed(1)}`)
+        }, `RMP ${rmpData.rating.toFixed(1)}`),
+        createElement('button', {
+          onClick: handleAddToBuilder,
+          disabled: addState === 'loading' || addState === 'done',
+          style: {
+            fontSize: 9,
+            padding: '3px 7px',
+            borderRadius: 4,
+            border: 'none',
+            background: addState === 'done' ? '#065f46' : addState === 'err' ? '#7f1d1d' : '#1d4ed8',
+            color: '#f9fafb',
+            cursor: addState === 'loading' || addState === 'done' ? 'default' : 'pointer',
+            flexShrink: 0,
+            fontWeight: 600,
+          },
+        }, addLabel)
       )
     ),
     // Grade bars

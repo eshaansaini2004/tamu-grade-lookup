@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
-import { sendGetPageStats } from '../shared/messages';
-import type { PageStats } from '../shared/messages';
+import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder } from '../shared/messages';
+import type { PageStats, RankedInstructor } from '../shared/messages';
 import { storageGet, removeSection, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
-import type { SavedSection, Schedule } from '../shared/types';
+import type { SavedSection, Schedule, ApiSection } from '../shared/types';
 
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
+const DEFAULT_TERM = 'Spring 2026 - College Station';
 
-type Tab = 'overview' | 'saved';
+const TERMS = [
+  'Fall 2026 - College Station',
+  'Spring 2026 - College Station',
+  'Fall 2025 - College Station',
+  'Spring 2025 - College Station',
+];
+
+type Tab = 'overview' | 'saved' | 'search';
 type Status = 'loading' | 'not-on-page' | 'ready';
 
 const C = {
@@ -132,7 +140,7 @@ function OverviewTab({ status, stats }: { status: Status; stats: PageStats | nul
           </div>
         </div>
       )}
-      <div style={C.muted}>Grades from anex.us · RMP ratings weighted</div>
+      <div style={C.muted}>Grades from grades.adibarra.com · RMP ratings weighted</div>
     </>
   );
 }
@@ -195,6 +203,244 @@ function SavedTab({
           </div>
         );
       })}
+    </>
+  );
+}
+
+function gpaColor(gpa: number): string {
+  if (gpa >= 3.5) return '#34d399';
+  if (gpa >= 2.5) return '#fbbf24';
+  return '#f87171';
+}
+
+function PopupInstructorCard({
+  instructor,
+  sections,
+  dept,
+  number,
+  term,
+}: {
+  instructor: RankedInstructor;
+  sections: ApiSection[];
+  dept: string;
+  number: string;
+  term: string;
+}) {
+  const [addState, setAddState] = useState<'idle' | 'loading' | 'done' | 'err'>('idle');
+  const [errMsg, setErrMsg] = useState('');
+  const { gradeData, rmpData } = instructor;
+
+  const lastName = instructor.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+  const mySections = sections.filter((s) =>
+    (s.instructor ?? []).some((i) => {
+      const iLast = i.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+      return iLast === lastName;
+    })
+  );
+
+  async function handleAdd() {
+    setAddState('loading');
+    setErrMsg('');
+    const sectionCrns = mySections.map((s) => s.registrationNumber);
+    const ok = await sendAddCourseToBuilder(dept, number, term, sectionCrns);
+    setAddState(ok ? 'done' : 'err');
+    if (!ok) setErrMsg('Failed — visit Schedule Builder once to refresh auth');
+  }
+
+  const addLabel = addState === 'loading' ? '…' : addState === 'done' ? 'Added ✓' : addState === 'err' ? 'Failed' : '+ Builder';
+
+  return (
+    <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5, gap: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#f9fafb', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {instructor.name}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: gpaColor(gradeData.avgGpa) }}>
+            {gradeData.avgGpa.toFixed(2)}
+          </span>
+          {rmpData && <span style={{ fontSize: 9, color: '#9ca3af' }}>★{rmpData.rating.toFixed(1)}</span>}
+          <button
+            onClick={handleAdd}
+            disabled={addState === 'loading' || addState === 'done'}
+            style={{
+              fontSize: 9,
+              padding: '2px 6px',
+              borderRadius: 3,
+              border: 'none',
+              background: addState === 'done' ? '#065f46' : addState === 'err' ? '#7f1d1d' : '#1d4ed8',
+              color: '#f9fafb',
+              cursor: addState === 'loading' || addState === 'done' ? 'default' : 'pointer',
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            {addLabel}
+          </button>
+        </div>
+      </div>
+      {[
+        { label: 'A', pct: gradeData.pctA, color: '#34d399' },
+        { label: 'B', pct: gradeData.pctB, color: '#60a5fa' },
+        { label: 'C', pct: gradeData.pctC, color: '#fbbf24' },
+        { label: 'D/F', pct: gradeData.pctD + gradeData.pctF, color: '#f87171' },
+      ].map(({ label, pct, color }) => (
+        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+          <div style={{ width: 16, fontSize: 8, color: '#6b7280', flexShrink: 0 }}>{label}</div>
+          <div style={{ flex: 1, height: 5, background: '#111827', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
+          </div>
+          <div style={{ width: 24, fontSize: 8, color: '#6b7280', textAlign: 'right', flexShrink: 0 }}>{pct}%</div>
+        </div>
+      ))}
+      {mySections.length > 0 && (
+        <div style={{ marginTop: 5, fontSize: 9, color: '#6b7280' }}>
+          {mySections.slice(0, 3).map((s) => `CRN ${s.registrationNumber}`).join(' · ')}
+          {mySections.length > 3 && ` +${mySections.length - 3} more`}
+        </div>
+      )}
+      {errMsg && (
+        <div style={{ marginTop: 4, fontSize: 9, color: '#f87171' }}>{errMsg}</div>
+      )}
+    </div>
+  );
+}
+
+function SearchTab() {
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [instructors, setInstructors] = useState<RankedInstructor[]>([]);
+  const [sections, setSections] = useState<ApiSection[]>([]);
+  const [searchedCourse, setSearchedCourse] = useState('');
+  const [term, setTerm] = useState(DEFAULT_TERM);
+
+  useEffect(() => {
+    chrome.storage.local.get('currentTerm', (r) => {
+      if (r.currentTerm) setTerm(r.currentTerm as string);
+    });
+  }, []);
+
+  function handleTermChange(newTerm: string) {
+    setTerm(newTerm);
+    chrome.storage.local.set({ currentTerm: newTerm });
+    // Clear results — they were for the old term
+    setInstructors([]);
+    setSections([]);
+    setSearchedCourse('');
+  }
+
+  function parseCourse(raw: string): { dept: string; number: string } | null {
+    const m = raw.trim().toUpperCase().match(/^([A-Z]{2,6})\s*(\d{3,4})$/);
+    if (!m) return null;
+    return { dept: m[1], number: m[2] };
+  }
+
+  async function handleSearch() {
+    const parsed = parseCourse(query);
+    if (!parsed) { setError('Enter a course like "CSCE 312"'); return; }
+    setError('');
+    setLoading(true);
+    setInstructors([]);
+    setSections([]);
+
+    const [searchRes, sects] = await Promise.all([
+      sendCourseSearch(parsed.dept, parsed.number),
+      sendFetchSections(parsed.dept, parsed.number, term),
+    ]);
+
+    setInstructors(searchRes.instructors);
+    setSections(sects);
+    setSearchedCourse(`${parsed.dept} ${parsed.number}`);
+    setLoading(false);
+  }
+
+  const [dept, number] = searchedCourse ? searchedCourse.split(' ') : ['', ''];
+
+  return (
+    <>
+      <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid #1f2937' }}>
+        <select
+          value={term}
+          onChange={(e) => handleTermChange(e.target.value)}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            background: '#111827',
+            border: '1px solid #374151',
+            borderRadius: 5,
+            padding: '5px 7px',
+            fontSize: 11,
+            color: '#9ca3af',
+            outline: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          {(TERMS.includes(term) ? TERMS : [term, ...TERMS]).map((t) => (
+            <option key={t} value={t}>{t.replace(' - College Station', '')}</option>
+          ))}
+        </select>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+            placeholder="CSCE 312"
+            autoFocus
+            style={{
+              flex: 1,
+              background: '#111827',
+              border: '1px solid #374151',
+              borderRadius: 5,
+              padding: '6px 8px',
+              fontSize: 12,
+              color: '#f9fafb',
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleSearch}
+            disabled={loading}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              background: '#500000',
+              color: '#f9fafb',
+              border: 'none',
+              borderRadius: 5,
+              cursor: loading ? 'default' : 'pointer',
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            {loading ? '…' : 'Search'}
+          </button>
+        </div>
+        {error && <div style={{ fontSize: 10, color: '#f87171', marginTop: 4 }}>{error}</div>}
+      </div>
+      <div style={{ maxHeight: 380, overflowY: 'auto', padding: '10px 12px' }}>
+        {loading && <div style={{ fontSize: 11, color: '#6b7280' }}>Fetching…</div>}
+        {!loading && instructors.length === 0 && searchedCourse && (
+          <div style={{ fontSize: 11, color: '#6b7280' }}>No grade data found for this course.</div>
+        )}
+        {!loading && instructors.length > 0 && (
+          <>
+            <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 8 }}>
+              {instructors.length} instructor{instructors.length !== 1 ? 's' : ''} · {searchedCourse} · ranked by GPA + RMP
+            </div>
+            {instructors.map((inst) => (
+              <PopupInstructorCard
+                key={inst.name}
+                instructor={inst}
+                sections={sections}
+                dept={dept}
+                number={number}
+                term={term}
+              />
+            ))}
+          </>
+        )}
+      </div>
     </>
   );
 }
@@ -271,13 +517,18 @@ export default function App() {
           <button style={C.tab(tab === 'saved')} onClick={() => setTab('saved')}>
             Saved {savedSections.length > 0 ? `(${savedSections.length})` : ''}
           </button>
+          <button style={C.tab(tab === 'search')} onClick={() => setTab('search')}>Search</button>
         </div>
       </div>
 
-      <div style={C.body}>
-        {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
-        {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} />}
-      </div>
+      {tab === 'search' ? (
+        <SearchTab />
+      ) : (
+        <div style={C.body}>
+          {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
+          {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} />}
+        </div>
+      )}
 
       <div style={{ padding: '0 16px 12px', borderTop: '1px solid #1f2937' }}>
         <button
