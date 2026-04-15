@@ -1,4 +1,4 @@
-export const ANEX_URL = 'https://anex.us/grades/getData/';
+export const GRADES_API = 'https://grades.adibarra.com/api/v1/analyze';
 export const RMP_URL = 'https://www.ratemyprofessors.com/graphql';
 export const RMP_SCHOOL_ID = 'U2Nob29sLTEwMDM='; // TAMU College Station
 export const RMP_AUTH = 'Basic dGVzdDp0ZXN0';

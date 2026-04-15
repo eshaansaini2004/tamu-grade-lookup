@@ -2,7 +2,18 @@ import type { GradeData, RmpData } from './types';
 import { DEPT_KEYWORDS, RMP_PRIOR_MEAN, RMP_PRIOR_WEIGHT } from './constants';
 
 export function parseName(instructorName: string): { last: string; first: string } {
-  const parts = instructorName.split(',').map((s) => s.trim());
+  if (instructorName.includes(',')) {
+    // "Last, First" format (Schedule Builder / Howdy)
+    const parts = instructorName.split(',').map((s) => s.trim());
+    return { last: parts[0] || '', first: parts[1] || '' };
+  }
+  // No comma — "Last First" or "Last Name Initial" (Adibarra/anex.us, e.g. "Da Silva D")
+  const parts = instructorName.trim().split(/\s+/);
+  if (parts.length >= 2 && parts[parts.length - 1].length === 1) {
+    // Trailing single-char initial: everything before it is the last name
+    return { last: parts.slice(0, -1).join(' '), first: parts[parts.length - 1] };
+  }
+  // Full name: first token = last, second = first
   return { last: parts[0] || '', first: parts[1] || '' };
 }
 

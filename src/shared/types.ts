@@ -47,3 +47,19 @@ export interface StorageSchema {
   schedules: Schedule[];
   activeScheduleId: string | null;
 }
+
+export interface ApiMeeting {
+  daysRaw: string;
+  startTime: number;
+  endTime: number;
+  location?: string;
+  meetingType?: string;
+}
+
+export interface ApiSection {
+  registrationNumber: string;
+  sectionNumber?: string;
+  credits?: number;
+  instructor: { name: string; id?: string }[];
+  meetings: ApiMeeting[];
+}

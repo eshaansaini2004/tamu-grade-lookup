@@ -8,7 +8,7 @@ export default defineManifest({
   permissions: ['storage', 'tabs'],
   host_permissions: [
     '*://tamu.collegescheduler.com/*',
-    '*://anex.us/*',
+    '*://grades.adibarra.com/*',
     '*://www.ratemyprofessors.com/*',
     '*://howdyportal.tamu.edu/*',
   ],
