@@ -7,7 +7,8 @@ export type Message =
   | { type: 'GET_PAGE_STATS' }
   | { type: 'COURSE_SEARCH'; dept: string; number: string }
   | { type: 'FETCH_SECTIONS'; dept: string; number: string; term: string }
-  | { type: 'ADD_COURSE_TO_BUILDER'; dept: string; number: string; term: string; sectionCrns: string[] };
+  | { type: 'ADD_COURSE_TO_BUILDER'; dept: string; number: string; term: string; sectionCrns: string[] }
+  | { type: 'REFRESH_SECTIONS' };
 
 export interface RankedInstructor {
   name: string;
@@ -124,6 +125,28 @@ export function sendCourseSearch(dept: string, number: string): Promise<CourseSe
         clearTimeout(timer);
         if (chrome.runtime.lastError || !response) {
           resolve({ instructors: [] });
+          return;
+        }
+        resolve(response);
+      },
+    );
+  });
+}
+
+export interface RefreshSectionsResponse {
+  updatedCount: number;
+  timestamp: number;
+}
+
+export function sendRefreshSections(): Promise<RefreshSectionsResponse | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 30_000);
+    chrome.runtime.sendMessage(
+      { type: 'REFRESH_SECTIONS' } satisfies Message,
+      (response: RefreshSectionsResponse) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError || !response) {
+          resolve(null);
           return;
         }
         resolve(response);

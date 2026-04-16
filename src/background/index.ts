@@ -3,7 +3,7 @@
 import { GRADES_API, RMP_URL, RMP_SCHOOL_ID, RMP_AUTH, RMP_QUERY, GRADE_TTL_MS, RMP_TTL_MS } from '../shared/constants';
 import { matchProf, pickBestRmp, parseName } from '../shared/nameMatch';
 import type { GradeData, RmpData, ApiSection } from '../shared/types';
-import type { LookupResponse, CourseSearchResponse, RankedInstructor, FetchSectionsResponse, AddCourseResponse } from '../shared/messages';
+import type { LookupResponse, CourseSearchResponse, RankedInstructor, FetchSectionsResponse, AddCourseResponse, RefreshSectionsResponse } from '../shared/messages';
 
 const SCHEDULER_BASE = 'https://tamu.collegescheduler.com';
 
@@ -273,6 +273,69 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } catch (e) {
         console.error('ADD_COURSE_TO_BUILDER error:', e);
         sendResponse({ ok: false } satisfies AddCourseResponse);
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'REFRESH_SECTIONS') {
+    (async () => {
+      try {
+        const stored = await chrome.storage.local.get(['savedSections', 'currentTerm']);
+        const savedSections = (stored.savedSections ?? {}) as Record<string, import('../shared/types').SavedSection>;
+        const term = (stored.currentTerm as string | undefined) ?? 'Spring 2026 - College Station';
+
+        // Group CRNs by dept+courseNumber to deduplicate regblocks calls
+        const courseMap = new Map<string, { dept: string; number: string; crns: string[] }>();
+        for (const [crn, section] of Object.entries(savedSections)) {
+          const key = `${section.dept}_${section.courseNumber}`;
+          if (!courseMap.has(key)) courseMap.set(key, { dept: section.dept, number: section.courseNumber, crns: [] });
+          courseMap.get(key)!.crns.push(crn);
+        }
+
+        // Fetch regblocks for each unique course, collect seat data by CRN
+        const seatsByCrn = new Map<string, import('../shared/types').SeatData>();
+        await Promise.all(
+          Array.from(courseMap.values()).map(async ({ dept, number }) => {
+            try {
+              const url = `${SCHEDULER_BASE}/api/terms/${encodeURIComponent(term)}/subjects/${dept.toUpperCase()}/courses/${number}/regblocks`;
+              const res = await fetch(url, { credentials: 'include' });
+              if (!res.ok) return;
+              const data = await res.json() as {
+                sections?: { crn?: number | string; openSeats?: number; totalSeats?: number; waitlistCount?: number }[];
+              };
+              for (const s of data.sections ?? []) {
+                if (s.crn == null) continue;
+                seatsByCrn.set(String(s.crn), {
+                  openSeats: s.openSeats,
+                  totalSeats: s.totalSeats,
+                  waitlistCount: s.waitlistCount,
+                });
+              }
+            } catch { /* ignore per-course failure */ }
+          })
+        );
+
+        if (seatsByCrn.size === 0) {
+          sendResponse({ updatedCount: 0, timestamp: Date.now() } satisfies RefreshSectionsResponse);
+          return;
+        }
+
+        const timestamp = Date.now();
+        let updatedCount = 0;
+        for (const [crn, section] of Object.entries(savedSections)) {
+          const seats = seatsByCrn.get(crn);
+          if (seats) {
+            savedSections[crn] = { ...section, seatData: seats, lastRefreshed: timestamp };
+            updatedCount++;
+          }
+        }
+
+        await chrome.storage.local.set({ savedSections });
+        sendResponse({ updatedCount, timestamp } satisfies RefreshSectionsResponse);
+      } catch (err) {
+        console.error('REFRESH_SECTIONS error:', err);
+        sendResponse({ updatedCount: 0, timestamp: Date.now() } satisfies RefreshSectionsResponse);
       }
     })();
     return true;

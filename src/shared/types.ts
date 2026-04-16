@@ -27,6 +27,8 @@ export interface SavedSection {
   rmpData: RmpData | null;
   addedAt: number;
   color?: string;
+  seatData?: SeatData;
+  lastRefreshed?: number;
 }
 
 export interface MeetingTime {
