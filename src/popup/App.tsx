@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder, sendRefreshSections } from '../shared/messages';
 import type { PageStats, RankedInstructor } from '../shared/messages';
 import { storageGet, removeSection, saveSection, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
-import type { SavedSection, Schedule, ApiSection } from '../shared/types';
+import type { SavedSection, Schedule, ApiSection, SectionStatus } from '../shared/types';
 
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
 const DEFAULT_TERM = 'Spring 2026 - College Station';
@@ -159,11 +159,41 @@ function autoColor(dept: string, num: string): string {
 
 const COOLDOWN_MS = 3000;
 
-function seatStatus(seatData: import('../shared/types').SeatData): 'OPEN' | 'WAITLISTED' | 'CLOSED' | null {
+function seatStatus(seatData: import('../shared/types').SeatData): SectionStatus | null {
   if (seatData.openSeats === undefined && seatData.waitlistCount === undefined) return null;
   if ((seatData.openSeats ?? 0) > 0) return 'OPEN';
   if ((seatData.waitlistCount ?? 0) > 0) return 'WAITLISTED';
   return 'CLOSED';
+}
+
+const STATUS_STYLE: Record<SectionStatus, { bg: string; color: string; border: string }> = {
+  OPEN:       { bg: '#d1fae5', color: '#065f46', border: '#6ee7b7' },
+  WAITLISTED: { bg: '#fef9c3', color: '#713f12', border: '#fde047' },
+  CLOSED:     { bg: '#fee2e2', color: '#7f1d1d', border: '#fca5a5' },
+};
+
+function SeatInfo({ seatData }: { seatData: import('../shared/types').SeatData }) {
+  const status = seatStatus(seatData);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {seatData.openSeats !== undefined && (
+        <span>{seatData.openSeats}/{seatData.totalSeats ?? '?'} open</span>
+      )}
+      {status && (
+        <span style={{
+          padding: '0 5px',
+          borderRadius: 8,
+          fontSize: 9,
+          fontWeight: 700,
+          background: STATUS_STYLE[status].bg,
+          color: STATUS_STYLE[status].color,
+          border: `1px solid ${STATUS_STYLE[status].border}`,
+        }}>
+          {status}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function formatRelativeTime(ts: number): string {
@@ -188,21 +218,26 @@ function SavedTab({
 }) {
   const [pickerCrn, setPickerCrn] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastClickedAt, setLastClickedAt] = useState(0);
+  const [cooldownActive, setCooldownActive] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (cooldownTimer.current) clearTimeout(cooldownTimer.current); };
+  }, []);
 
   if (sections.length === 0) {
     return <div style={C.empty}>No saved sections yet.<br />Click ☆ on any section to save it.</div>;
   }
 
   const conflicts = findConflicts(sections);
-  const cooldownActive = Date.now() - lastClickedAt < COOLDOWN_MS;
 
   async function handleRefresh() {
     if (refreshing || cooldownActive) return;
     setRefreshing(true);
     setRefreshError(false);
-    setLastClickedAt(Date.now());
+    setCooldownActive(true);
+    cooldownTimer.current = setTimeout(() => setCooldownActive(false), COOLDOWN_MS);
     const ok = await onRefresh();
     setRefreshing(false);
     if (!ok) setRefreshError(true);
@@ -284,35 +319,11 @@ function SavedTab({
                   </span>
                 )}
               </div>
-              {s.seatData && (() => {
-                const status = seatStatus(s.seatData);
-                const statusColors: Record<string, { bg: string; color: string; border: string }> = {
-                  OPEN: { bg: '#d1fae5', color: '#065f46', border: '#6ee7b7' },
-                  WAITLISTED: { bg: '#fef9c3', color: '#713f12', border: '#fde047' },
-                  CLOSED: { bg: '#fee2e2', color: '#7f1d1d', border: '#fca5a5' },
-                };
-                const style = status ? statusColors[status] : null;
-                return (
-                  <div style={{ ...C.savedMeta, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {s.seatData.openSeats !== undefined && (
-                      <span>{s.seatData.openSeats}/{s.seatData.totalSeats ?? '?'} open</span>
-                    )}
-                    {status && style && (
-                      <span style={{
-                        padding: '0 5px',
-                        borderRadius: 8,
-                        fontSize: 9,
-                        fontWeight: 700,
-                        background: style.bg,
-                        color: style.color,
-                        border: `1px solid ${style.border}`,
-                      }}>
-                        {status}
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
+              {s.seatData && (
+                <div style={{ ...C.savedMeta, marginTop: 3 }}>
+                  <SeatInfo seatData={s.seatData} />
+                </div>
+              )}
               {isPickerOpen && (
                 <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' as const }}>
                   {SWATCH_COLORS.map((color) => (
@@ -656,8 +667,10 @@ export default function App() {
   };
 
   const handleRefresh = async (): Promise<boolean> => {
-    const result = await sendRefreshSections();
-    return result !== null;
+    const stored = await chrome.storage.local.get('currentTerm');
+    const term = (stored.currentTerm as string | undefined) ?? DEFAULT_TERM;
+    const result = await sendRefreshSections(term);
+    return result !== null && !result.error;
   };
 
   const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;

@@ -8,7 +8,7 @@ export type Message =
   | { type: 'COURSE_SEARCH'; dept: string; number: string }
   | { type: 'FETCH_SECTIONS'; dept: string; number: string; term: string }
   | { type: 'ADD_COURSE_TO_BUILDER'; dept: string; number: string; term: string; sectionCrns: string[] }
-  | { type: 'REFRESH_SECTIONS' };
+  | { type: 'REFRESH_SECTIONS'; term: string };
 
 export interface RankedInstructor {
   name: string;
@@ -136,13 +136,14 @@ export function sendCourseSearch(dept: string, number: string): Promise<CourseSe
 export interface RefreshSectionsResponse {
   updatedCount: number;
   timestamp: number;
+  error?: boolean;
 }
 
-export function sendRefreshSections(): Promise<RefreshSectionsResponse | null> {
+export function sendRefreshSections(term: string): Promise<RefreshSectionsResponse | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), 30_000);
     chrome.runtime.sendMessage(
-      { type: 'REFRESH_SECTIONS' } satisfies Message,
+      { type: 'REFRESH_SECTIONS', term } satisfies Message,
       (response: RefreshSectionsResponse) => {
         clearTimeout(timer);
         if (chrome.runtime.lastError || !response) {
