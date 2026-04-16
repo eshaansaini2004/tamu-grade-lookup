@@ -26,6 +26,7 @@ export interface SavedSection {
   gradeData: GradeData | null;
   rmpData: RmpData | null;
   addedAt: number;
+  color?: string;
 }
 
 export interface MeetingTime {

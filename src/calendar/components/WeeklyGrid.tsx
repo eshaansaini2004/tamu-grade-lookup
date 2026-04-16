@@ -32,6 +32,14 @@ function courseColor(dept: string, num: string) {
   return PALETTE[h % PALETTE.length];
 }
 
+function sectionColor(section: import('../../shared/types').SavedSection) {
+  if (section.color) {
+    const entry = PALETTE.find((p) => p.border === section.color);
+    if (entry) return entry;
+  }
+  return courseColor(section.dept, section.courseNumber);
+}
+
 function minToLabel(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -140,7 +148,7 @@ export default function WeeklyGrid({ sections }: { sections: SavedSection[] }) {
               {/* Section blocks */}
               {daySections.map(({ section, mt }, i) => {
                 const isConflict = conflicts.has(section.crn);
-                const color = isConflict ? CONFLICT_COLOR : courseColor(section.dept, section.courseNumber);
+                const color = isConflict ? CONFLICT_COLOR : sectionColor(section);
 
                 return (
                   <div
