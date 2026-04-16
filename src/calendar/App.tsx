@@ -140,6 +140,18 @@ export default function App() {
     await deleteSchedule(activeId);
   }
 
+  async function handleDuplicateSchedule() {
+    if (!activeSchedule) return;
+    const newSched: Schedule = {
+      id: genId(),
+      name: `${activeSchedule.name} Copy`,
+      sectionCrns: [...activeSchedule.sectionCrns],
+      createdAt: Date.now(),
+    };
+    await saveSchedule(newSched);
+    await setActiveSchedule(newSched.id);
+  }
+
   async function handleRenameCommit() {
     if (!activeSchedule || !renameVal.trim()) { setRenaming(false); return; }
     await saveSchedule({ ...activeSchedule, name: renameVal.trim() });
@@ -201,6 +213,13 @@ export default function App() {
                 {activeSchedule.name} (click to rename)
               </span>
             )}
+            <button
+              style={{ ...S.deleteBtn, color: '#60a5fa', borderColor: '#1d4ed8' }}
+              title="Duplicate schedule"
+              onClick={handleDuplicateSchedule}
+            >
+              Duplicate
+            </button>
             <button style={S.deleteBtn} onClick={handleDelete}>Delete schedule</button>
           </div>
         )}
