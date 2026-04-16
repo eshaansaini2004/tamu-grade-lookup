@@ -217,6 +217,12 @@ function InstructorCard({
         rmpData && createElement('div', {
           style: { fontSize: 11, color: '#9ca3af' },
         }, `RMP ${rmpData.rating.toFixed(1)}`),
+        createElement('a', {
+          className: 'trp-cis-link',
+          href: `https://cis.tamu.edu/results?instructor=${encodeURIComponent(lastName)}`,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        }, 'CIS'),
         createElement('button', {
           onClick: handleAddToBuilder,
           disabled: addState === 'loading' || addState === 'done',

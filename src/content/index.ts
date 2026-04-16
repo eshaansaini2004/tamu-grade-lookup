@@ -245,6 +245,17 @@ function injectBadge(nameSpan: Element, gradeData: GradeData | null, rmpData: Rm
   }
 
   nameSpan.after(badge);
+
+  const lastName = nameSpan.textContent?.split(/[\s,]+/).filter(Boolean).pop() ?? '';
+  if (lastName) {
+    const cisLink = document.createElement('a');
+    cisLink.className = 'trp-cis-link';
+    cisLink.href = `https://cis.tamu.edu/results?instructor=${encodeURIComponent(lastName)}`;
+    cisLink.target = '_blank';
+    cisLink.rel = 'noopener noreferrer';
+    cisLink.textContent = 'CIS';
+    badge.after(cisLink);
+  }
 }
 
 // ─── per-element processing ───────────────────────────────────────────────────
