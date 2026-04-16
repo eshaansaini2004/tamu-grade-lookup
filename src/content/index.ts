@@ -7,6 +7,7 @@ import type { PageStats } from '../shared/messages';
 import type { GradeData, MeetingTime, RmpData, SavedSection, SeatData, SectionStatus } from '../shared/types';
 import { storageGet, saveSection, removeSection } from '../shared/storage';
 import { parseMeetingFromApi } from '../shared/conflictDetection';
+import { parseName } from '../shared/nameMatch';
 import { gpaColorClass } from '../shared/gradeUtils';
 import { mountPanel, rerenderPanel, unmountPanel } from './mount';
 import SectionComparison, { type InstructorData } from './components/SectionComparison';
@@ -246,7 +247,7 @@ function injectBadge(nameSpan: Element, gradeData: GradeData | null, rmpData: Rm
 
   nameSpan.after(badge);
 
-  const lastName = nameSpan.textContent?.split(/[\s,]+/).filter(Boolean).pop() ?? '';
+  const { last: lastName } = parseName(nameSpan.textContent?.trim() ?? '');
   if (lastName) {
     const cisLink = document.createElement('a');
     cisLink.className = 'trp-cis-link';
