@@ -11,13 +11,22 @@
 
     if (url.includes('/regblocks')) {
       res.clone().json().then((data: {
-        sections?: { crn: number | string; meetings?: unknown[] }[];
+        sections?: {
+          crn: number | string;
+          meetings?: unknown[];
+          openSeats?: number;
+          totalSeats?: number;
+          waitlistCount?: number;
+        }[];
       }) => {
         for (const section of data.sections ?? []) {
           window.postMessage({
             type: '__TRP_MEETINGS__',
             crn: String(section.crn),
             meetings: section.meetings ?? [],
+            openSeats: section.openSeats,
+            totalSeats: section.totalSeats,
+            waitlistCount: section.waitlistCount,
           }, '*');
         }
       }).catch(() => {});
