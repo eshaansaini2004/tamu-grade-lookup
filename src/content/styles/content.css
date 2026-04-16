@@ -227,6 +227,30 @@
   color: #500000;
 }
 
+/* ─── CIS link ──────────────────────────────────────────────────────────────── */
+
+.trp-cis-link {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #9ca3af;
+  background: none;
+  border: 1px solid #374151;
+  text-decoration: none;
+  vertical-align: middle;
+  line-height: 1.4;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.trp-cis-link:hover {
+  color: #f9fafb;
+  border-color: #6b7280;
+}
+
 /* ─── Section status badges ─────────────────────────────────────────────────── */
 
 .trp-status-badge {

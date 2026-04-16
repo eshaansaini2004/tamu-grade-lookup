@@ -4,6 +4,7 @@ import type { RankedInstructor } from '../../shared/messages';
 import type { ApiMeeting, ApiSection, MeetingTime, SavedSection } from '../../shared/types';
 import { saveSection } from '../../shared/storage';
 import { parseMeetingFromApi } from '../../shared/conflictDetection';
+import { parseName } from '../../shared/nameMatch';
 
 const SCHEDULER_BASE = 'https://tamu.collegescheduler.com';
 
@@ -217,6 +218,12 @@ function InstructorCard({
         rmpData && createElement('div', {
           style: { fontSize: 11, color: '#9ca3af' },
         }, `RMP ${rmpData.rating.toFixed(1)}`),
+        parseName(instructor.name).last && createElement('a', {
+          className: 'trp-cis-link',
+          href: `https://cis.tamu.edu/results?instructor=${encodeURIComponent(parseName(instructor.name).last)}`,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        }, 'CIS'),
         createElement('button', {
           onClick: handleAddToBuilder,
           disabled: addState === 'loading' || addState === 'done',
