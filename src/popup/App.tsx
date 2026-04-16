@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder } from '../shared/messages';
 import type { PageStats, RankedInstructor } from '../shared/messages';
-import { storageGet, removeSection, storageOnChanged } from '../shared/storage';
+import { storageGet, removeSection, saveSection, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
 import type { SavedSection, Schedule, ApiSection } from '../shared/types';
 
@@ -145,13 +145,29 @@ function OverviewTab({ status, stats }: { status: Status; stats: PageStats | nul
   );
 }
 
+// Border-color accents that mirror WeeklyGrid's PALETTE (same order)
+const SWATCH_COLORS = [
+  '#3b82f6', '#22c55e', '#a855f7', '#f59e0b',
+  '#14b8a6', '#eab308', '#60a5fa', '#f472b6',
+];
+
+function autoColor(dept: string, num: string): string {
+  let h = 0;
+  for (const c of dept + num) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return SWATCH_COLORS[h % SWATCH_COLORS.length];
+}
+
 function SavedTab({
   sections,
   onRemove,
+  onColorChange,
 }: {
   sections: SavedSection[];
   onRemove: (crn: string) => void;
+  onColorChange: (crn: string, color: string) => void;
 }) {
+  const [pickerCrn, setPickerCrn] = useState<string | null>(null);
+
   if (sections.length === 0) {
     return <div style={C.empty}>No saved sections yet.<br />Click ☆ on any section to save it.</div>;
   }
@@ -175,6 +191,8 @@ function SavedTab({
       )}
       {sections.map((s) => {
         const hasConflict = conflicts.has(s.crn);
+        const currentColor = s.color ?? autoColor(s.dept, s.courseNumber);
+        const isPickerOpen = pickerCrn === s.crn;
         return (
           <div key={s.crn} style={{
             ...C.savedCard,
@@ -198,8 +216,44 @@ function SavedTab({
                   </span>
                 )}
               </div>
+              {isPickerOpen && (
+                <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' as const }}>
+                  {SWATCH_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      title={color}
+                      onClick={() => { onColorChange(s.crn, color); setPickerCrn(null); }}
+                      style={{
+                        width: 16, height: 16,
+                        borderRadius: '50%',
+                        background: color,
+                        border: `2px solid ${currentColor === color ? '#f9fafb' : 'transparent'}`,
+                        cursor: 'pointer',
+                        padding: 0,
+                        flexShrink: 0,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-            <button style={C.removeBtn} title="Remove" onClick={() => onRemove(s.crn)}>×</button>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, flexShrink: 0 }}>
+              <button
+                title="Change color"
+                onClick={() => setPickerCrn(isPickerOpen ? null : s.crn)}
+                style={{
+                  width: 14, height: 14,
+                  borderRadius: '50%',
+                  background: currentColor,
+                  border: '2px solid #374151',
+                  cursor: 'pointer',
+                  padding: 0,
+                  flexShrink: 0,
+                  marginTop: 2,
+                }}
+              />
+              <button style={C.removeBtn} title="Remove" onClick={() => onRemove(s.crn)}>×</button>
+            </div>
           </div>
         );
       })}
@@ -498,6 +552,12 @@ export default function App() {
     await removeSection(crn);
   };
 
+  const handleColorChange = async (crn: string, color: string) => {
+    const section = savedSections.find((s) => s.crn === crn);
+    if (!section) return;
+    await saveSection({ ...section, color });
+  };
+
   const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;
 
   return (
@@ -526,7 +586,7 @@ export default function App() {
       ) : (
         <div style={C.body}>
           {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
-          {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} />}
+          {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} onColorChange={handleColorChange} />}
         </div>
       )}
 
