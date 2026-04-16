@@ -4,11 +4,10 @@ import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { sendLookup } from '../shared/messages';
 import type { PageStats } from '../shared/messages';
-import type { GradeData, MeetingTime, RmpData, SavedSection } from '../shared/types';
+import type { GradeData, MeetingTime, RmpData, SavedSection, SeatData, SectionStatus } from '../shared/types';
 import { storageGet, saveSection, removeSection } from '../shared/storage';
 import { parseMeetingFromApi } from '../shared/conflictDetection';
 import { gpaColorClass } from '../shared/gradeUtils';
-import type { SeatData, SectionStatus } from '../shared/types';
 import { mountPanel, rerenderPanel, unmountPanel } from './mount';
 import SectionComparison, { type InstructorData } from './components/SectionComparison';
 import CourseSearch from './components/CourseSearch';
@@ -385,31 +384,34 @@ async function injectSaveButton(tbody: Element, section: SavedSection) {
 
 const STATUS_ATTR = 'data-trp-status';
 
-function sectionStatus(seats: SeatData): SectionStatus {
-  if (seats.openSeats === undefined) return 'CLOSED'; // unknown — default to closed
-  if (seats.openSeats > 0) return 'OPEN';
+function sectionStatus(seats: SeatData): SectionStatus | null {
+  // All fields undefined means the API didn't return seat data — don't show a badge
+  if (seats.openSeats === undefined && seats.waitlistCount === undefined) return null;
+  if ((seats.openSeats ?? 0) > 0) return 'OPEN';
   if ((seats.waitlistCount ?? 0) > 0) return 'WAITLISTED';
   return 'CLOSED';
 }
 
 function injectStatusBadge(tbody: Element, crn: string) {
-  const firstRow = tbody.querySelector('tr');
-  if (!firstRow) return;
-
-  // Find the CRN cell
-  let crnTd: Element | null = null;
-  for (const td of firstRow.querySelectorAll('td')) {
-    if (/^\d{5}$/.test(td.textContent?.trim() ?? '')) { crnTd = td; break; }
-  }
-  if (!crnTd) return;
-
   const seats = crnSeats.get(crn);
   if (!seats) return;
+
+  const status = sectionStatus(seats);
+
+  // Find the CRN cell — we know the exact CRN string so match it directly
+  const firstRow = tbody.querySelector('tr');
+  if (!firstRow) return;
+  let crnTd: Element | null = null;
+  for (const td of firstRow.querySelectorAll('td')) {
+    if (td.textContent?.trim() === crn) { crnTd = td; break; }
+  }
+  if (!crnTd) return;
 
   // Remove stale badge before re-injecting (e.g., after a manual refresh)
   crnTd.querySelector(`[${STATUS_ATTR}]`)?.remove();
 
-  const status = sectionStatus(seats);
+  if (!status) return; // no known seat data — don't inject a badge
+
   const badge = document.createElement('span');
   badge.setAttribute(STATUS_ATTR, status);
   badge.className = `trp-status-badge trp-status-${status.toLowerCase()}`;
