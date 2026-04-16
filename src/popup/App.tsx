@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder } from '../shared/messages';
+import { useEffect, useRef, useState } from 'react';
+import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder, sendRefreshSections } from '../shared/messages';
 import type { PageStats, RankedInstructor } from '../shared/messages';
 import { storageGet, removeSection, saveSection, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
-import type { SavedSection, Schedule, ApiSection } from '../shared/types';
+import type { SavedSection, Schedule, ApiSection, SectionStatus } from '../shared/types';
 
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
 const DEFAULT_TERM = 'Spring 2026 - College Station';
@@ -157,16 +157,74 @@ function autoColor(dept: string, num: string): string {
   return SWATCH_COLORS[h % SWATCH_COLORS.length];
 }
 
+const COOLDOWN_MS = 3000;
+
+function seatStatus(seatData: import('../shared/types').SeatData): SectionStatus | null {
+  if (seatData.openSeats === undefined && seatData.waitlistCount === undefined) return null;
+  if ((seatData.openSeats ?? 0) > 0) return 'OPEN';
+  if ((seatData.waitlistCount ?? 0) > 0) return 'WAITLISTED';
+  return 'CLOSED';
+}
+
+const STATUS_STYLE: Record<SectionStatus, { bg: string; color: string; border: string }> = {
+  OPEN:       { bg: '#d1fae5', color: '#065f46', border: '#6ee7b7' },
+  WAITLISTED: { bg: '#fef9c3', color: '#713f12', border: '#fde047' },
+  CLOSED:     { bg: '#fee2e2', color: '#7f1d1d', border: '#fca5a5' },
+};
+
+function SeatInfo({ seatData }: { seatData: import('../shared/types').SeatData }) {
+  const status = seatStatus(seatData);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {seatData.openSeats !== undefined && (
+        <span>{seatData.openSeats}/{seatData.totalSeats ?? '?'} open</span>
+      )}
+      {status && (
+        <span style={{
+          padding: '0 5px',
+          borderRadius: 8,
+          fontSize: 9,
+          fontWeight: 700,
+          background: STATUS_STYLE[status].bg,
+          color: STATUS_STYLE[status].color,
+          border: `1px solid ${STATUS_STYLE[status].border}`,
+        }}>
+          {status}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function formatRelativeTime(ts: number): string {
+  const diffMs = Date.now() - ts;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  return `${diffH}h ago`;
+}
+
 function SavedTab({
   sections,
   onRemove,
   onColorChange,
+  onRefresh,
 }: {
   sections: SavedSection[];
   onRemove: (crn: string) => void;
   onColorChange: (crn: string, color: string) => void;
+  onRefresh: () => Promise<boolean>;
 }) {
   const [pickerCrn, setPickerCrn] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cooldownActive, setCooldownActive] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (cooldownTimer.current) clearTimeout(cooldownTimer.current); };
+  }, []);
 
   if (sections.length === 0) {
     return <div style={C.empty}>No saved sections yet.<br />Click ☆ on any section to save it.</div>;
@@ -174,8 +232,53 @@ function SavedTab({
 
   const conflicts = findConflicts(sections);
 
+  async function handleRefresh() {
+    if (refreshing || cooldownActive) return;
+    setRefreshing(true);
+    setRefreshError(false);
+    setCooldownActive(true);
+    cooldownTimer.current = setTimeout(() => setCooldownActive(false), COOLDOWN_MS);
+    const ok = await onRefresh();
+    setRefreshing(false);
+    if (!ok) setRefreshError(true);
+  }
+
+  // Find the most recent lastRefreshed across all sections
+  const lastRefreshed = sections.reduce((best, s) => Math.max(best, s.lastRefreshed ?? 0), 0);
+
   return (
     <>
+      {/* Refresh row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <span style={{ fontSize: 10, color: refreshError ? '#f87171' : '#4b5563' }}>
+          {refreshError
+            ? 'Refresh failed — visit Schedule Builder'
+            : lastRefreshed > 0
+              ? `Updated ${formatRelativeTime(lastRefreshed)}`
+              : 'Seat counts not yet fetched'}
+        </span>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing || cooldownActive}
+          title="Re-fetch seat counts"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '3px 8px',
+            fontSize: 10,
+            fontWeight: 600,
+            background: 'none',
+            border: '1px solid #374151',
+            borderRadius: 5,
+            color: refreshing || cooldownActive ? '#4b5563' : '#9ca3af',
+            cursor: refreshing || cooldownActive ? 'default' : 'pointer',
+          }}
+        >
+          {refreshing ? '↻ …' : '↻ Refresh'}
+        </button>
+      </div>
+
       {conflicts.size > 0 && (
         <div style={{
           background: '#7f1d1d',
@@ -216,6 +319,11 @@ function SavedTab({
                   </span>
                 )}
               </div>
+              {s.seatData && (
+                <div style={{ ...C.savedMeta, marginTop: 3 }}>
+                  <SeatInfo seatData={s.seatData} />
+                </div>
+              )}
               {isPickerOpen && (
                 <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' as const }}>
                   {SWATCH_COLORS.map((color) => (
@@ -558,6 +666,13 @@ export default function App() {
     await saveSection({ ...section, color });
   };
 
+  const handleRefresh = async (): Promise<boolean> => {
+    const stored = await chrome.storage.local.get('currentTerm');
+    const term = (stored.currentTerm as string | undefined) ?? DEFAULT_TERM;
+    const result = await sendRefreshSections(term);
+    return result !== null && !result.error;
+  };
+
   const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;
 
   return (
@@ -586,7 +701,7 @@ export default function App() {
       ) : (
         <div style={C.body}>
           {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
-          {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} onColorChange={handleColorChange} />}
+          {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} />}
         </div>
       )}
 
