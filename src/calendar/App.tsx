@@ -213,7 +213,13 @@ export default function App() {
                 {activeSchedule.name} (click to rename)
               </span>
             )}
-            <button style={S.deleteBtn} onClick={handleDuplicateSchedule}>Duplicate</button>
+            <button
+              style={{ ...S.deleteBtn, color: '#60a5fa', borderColor: '#1d4ed8' }}
+              title="Duplicate schedule"
+              onClick={handleDuplicateSchedule}
+            >
+              Duplicate
+            </button>
             <button style={S.deleteBtn} onClick={handleDelete}>Delete schedule</button>
           </div>
         )}
