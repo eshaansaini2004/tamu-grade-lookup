@@ -63,3 +63,11 @@ export interface ApiSection {
   instructor: { name: string; id?: string }[];
   meetings: ApiMeeting[];
 }
+
+export interface SeatData {
+  openSeats: number | undefined;
+  totalSeats: number | undefined;
+  waitlistCount: number | undefined;
+}
+
+export type SectionStatus = 'OPEN' | 'WAITLISTED' | 'CLOSED';

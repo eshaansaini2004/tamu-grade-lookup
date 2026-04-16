@@ -8,6 +8,7 @@ import type { GradeData, MeetingTime, RmpData, SavedSection } from '../shared/ty
 import { storageGet, saveSection, removeSection } from '../shared/storage';
 import { parseMeetingFromApi } from '../shared/conflictDetection';
 import { gpaColorClass } from '../shared/gradeUtils';
+import type { SeatData, SectionStatus } from '../shared/types';
 import { mountPanel, rerenderPanel, unmountPanel } from './mount';
 import SectionComparison, { type InstructorData } from './components/SectionComparison';
 import CourseSearch from './components/CourseSearch';
@@ -18,13 +19,34 @@ const BADGE_ATTR = 'data-trp';
 
 
 const crnMeetings = new Map<string, MeetingTime[]>();
+const crnSeats = new Map<string, SeatData>();
 
-// Receive meeting data relayed from the MAIN world interceptor (interceptor.ts)
+// Receive meeting + seat data relayed from the MAIN world interceptor (interceptor.ts)
 window.addEventListener('message', (e) => {
   if (e.data?.type !== '__TRP_MEETINGS__') return;
   const meetings = (e.data.meetings ?? []) as { daysRaw: string; startTime: number; endTime: number; location?: string }[];
   const times = meetings.map(parseMeetingFromApi);
   if (times.length) crnMeetings.set(String(e.data.crn), times);
+
+  const crn = String(e.data.crn);
+  const seatData: SeatData = {
+    openSeats: e.data.openSeats,
+    totalSeats: e.data.totalSeats,
+    waitlistCount: e.data.waitlistCount,
+  };
+  // Warn if all seat fields are missing — likely means API field names changed
+  if (seatData.openSeats === undefined && seatData.totalSeats === undefined && seatData.waitlistCount === undefined) {
+    console.warn('[TRP] No seat data in regblocks for CRN', crn, '— field names may have changed');
+  }
+  crnSeats.set(crn, seatData);
+
+  // Inject/update status badge now that we have seat data
+  for (const tbody of document.querySelectorAll('tbody')) {
+    if (getCrnFromTbody(tbody) === crn) {
+      injectStatusBadge(tbody, crn);
+      break;
+    }
+  }
 });
 
 // ─── course-level tracking ────────────────────────────────────────────────────
@@ -359,6 +381,42 @@ async function injectSaveButton(tbody: Element, section: SavedSection) {
   });
 }
 
+// ─── section status badges ────────────────────────────────────────────────────
+
+const STATUS_ATTR = 'data-trp-status';
+
+function sectionStatus(seats: SeatData): SectionStatus {
+  if (seats.openSeats === undefined) return 'CLOSED'; // unknown — default to closed
+  if (seats.openSeats > 0) return 'OPEN';
+  if ((seats.waitlistCount ?? 0) > 0) return 'WAITLISTED';
+  return 'CLOSED';
+}
+
+function injectStatusBadge(tbody: Element, crn: string) {
+  const firstRow = tbody.querySelector('tr');
+  if (!firstRow) return;
+
+  // Find the CRN cell
+  let crnTd: Element | null = null;
+  for (const td of firstRow.querySelectorAll('td')) {
+    if (/^\d{5}$/.test(td.textContent?.trim() ?? '')) { crnTd = td; break; }
+  }
+  if (!crnTd) return;
+
+  const seats = crnSeats.get(crn);
+  if (!seats) return;
+
+  // Remove stale badge before re-injecting (e.g., after a manual refresh)
+  crnTd.querySelector(`[${STATUS_ATTR}]`)?.remove();
+
+  const status = sectionStatus(seats);
+  const badge = document.createElement('span');
+  badge.setAttribute(STATUS_ATTR, status);
+  badge.className = `trp-status-badge trp-status-${status.toLowerCase()}`;
+  badge.textContent = status;
+  crnTd.appendChild(badge);
+}
+
 // ─── CRN copy buttons ─────────────────────────────────────────────────────────
 
 const COPY_ATTR = 'data-trp-copy';
@@ -400,10 +458,12 @@ function scanNode(root: Element | Document) {
   for (const li of findInstructorLis(root)) {
     processLi(li);
   }
-  // Inject CRN copy buttons on all tbodies in scope
+  // Inject CRN copy buttons and status badges on all tbodies in scope
   const tbodyRoot = root instanceof Document ? document.body : root;
   for (const tbody of tbodyRoot.querySelectorAll('tbody')) {
     injectCrnCopyButton(tbody);
+    const crn = getCrnFromTbody(tbody);
+    if (crn) injectStatusBadge(tbody, crn);
   }
 }
 
