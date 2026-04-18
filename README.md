@@ -1,73 +1,29 @@
-# tamu-grade-lookup
+# TAMU Registration+
 
-Discord bot for TAMU students. Give it a course, get back professor grade distributions, RMP ratings, and Fall section info — all in one place instead of tabbing between Howdy, anex.us, and Rate My Professors.
+Chrome extension that enhances [TAMU Schedule Builder](https://tamu.collegescheduler.com) with grade data, RMP ratings, and quality-of-life features.
 
-## What it does
+## Features
 
-`/lookup CSCE 221 ENGL 210` returns, for each course:
+- **Grade badges** — GPA, grade distribution (%A/%B/etc), and RMP rating injected next to every instructor name. Color-coded green/yellow/red by average GPA.
+- **Section status badges** — OPEN / WAITLISTED / CLOSED on every section row
+- **Saved sections** — bookmark sections you like, view them in a popup, manually refresh seat counts
+- **Per-section color coding** — assign a color to any section; reflects in the calendar grid
+- **CIS evaluation links** — direct links to student evaluations for each instructor
+- **Schedule plan duplication** — duplicate any saved schedule plan with one click
+- **Conflict detection** — warns when sections overlap
 
-- Every professor teaching it next semester with their section times and locations
-- Historical grade distribution (avg GPA, % A/B/C/D/F) from anex.us
-- Rate My Professors rating (N/A if not found)
-- Whether seats are open
+## Install
 
-Professors are sorted by avg GPA so the best option is at the top.
+1. Download `tamu-registration-plus-v1.0.0.zip` from the [latest release](../../releases/latest)
+2. Unzip it
+3. Open Chrome → `chrome://extensions` → enable **Developer mode** (top right)
+4. Click **Load unpacked** → select the `dist` folder inside the unzipped directory
+5. Navigate to [tamu.collegescheduler.com](https://tamu.collegescheduler.com) — badges and features load automatically
 
-`/select CSCE 221 Leyk ENGL 210 Baca` — logs into Howdy on your behalf and selects sections for the given professors. Requires `/login` first.
+> Chrome will show a reminder about developer-mode extensions on startup. That's normal for extensions not on the Web Store.
 
-`/reset CSCE 221 ENGL 210` — restores all sections to unselected.
+## Data sources
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
-
-Create a `.env` file:
-
-```
-DISCORD_TOKEN=your_bot_token_here
-```
-
-Run the bot:
-
-```bash
-python3 bot.py
-```
-
-### First-time login (for /select and /reset)
-
-1. Run `/login` in Discord
-2. The bot logs into Howdy with your TAMU credentials and shows you a Duo code
-3. Enter the code in Duo Mobile
-4. Session is saved per user — you only do this once
-
-## CLI usage
-
-You can also run lookups directly without the bot:
-
-```bash
-python3 lookup.py CSCE 221 POLS 338
-python3 lookup.py --json CSCE 221        # JSON output
-python3 lookup.py --out report.txt CSCE 221 ENGL 210
-```
-
-## Files
-
-| File | What it does |
-|------|-------------|
-| `bot.py` | Discord bot, slash commands |
-| `lookup.py` | Core logic, report formatting |
-| `howdy.py` | Pulls Fall sections from Howdy public API (no login) |
-| `scraper.py` | Fetches grade history from anex.us |
-| `rmp.py` | Rate My Professors ratings via GraphQL API |
-| `schedule.py` | Playwright automation for Howdy section selection |
-| `auth.py` | Per-user browser sessions, Duo MFA handling |
-| `models.py` | Pydantic data models |
-
-## Notes
-
-- Section data is for Fall semester only (hardcoded to latest Fall term)
-- Seat counts from Howdy are open/closed only — exact numbers aren't exposed publicly
-- RMP matches on last name at TAMU College Station; picks the entry with the most ratings if there are duplicates
+- Grade distributions: [grades.adibarra.com](https://grades.adibarra.com)
+- RMP ratings: Rate My Professors GraphQL API
+- Seat counts: Schedule Builder's own API (uses your existing session)
