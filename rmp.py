@@ -42,14 +42,28 @@ _cache: dict[str, Optional[float]] = {}
 _lock = threading.Lock()
 
 
+def _parse_name(prof_name: str) -> tuple[str, str]:
+    """
+    Handles two formats:
+      - "Last, First"  (comma-separated)
+      - "Last Initial" (anex.us format: last token is a single character)
+    Returns (last, first).
+    """
+    if "," in prof_name:
+        parts = prof_name.split(",", 1)
+        return parts[0].strip(), parts[1].strip()
+    parts = prof_name.strip().split()
+    if len(parts) >= 2 and len(parts[-1]) == 1:
+        return " ".join(parts[:-1]), parts[-1]
+    return parts[0] if parts else "", parts[1] if len(parts) > 1 else ""
+
+
 def get_rmp_rating(prof_name: str) -> Optional[float]:
     """
-    prof_name: 'Last, First' format (our internal format).
+    prof_name: 'Last, First' or 'Last Initial' format.
     Returns avg rating (0.0–5.0) or None if not found.
     """
-    parts = prof_name.split(",", 1)
-    last = parts[0].strip()
-    first = parts[1].strip() if len(parts) > 1 else ""
+    last, first = _parse_name(prof_name)
 
     cache_key = prof_name.lower()
     with _lock:
@@ -76,11 +90,13 @@ def get_rmp_rating(prof_name: str) -> Optional[float]:
             _cache[cache_key] = None
         return None
 
-    # Find best match: prefer exact last name match with most ratings
+    # Match on last name — handle multi-token last names (e.g. "Da Silva")
     last_lower = last.lower()
+    last_tokens = set(last_lower.split())
     candidates = [
         e["node"] for e in edges
-        if e["node"]["lastName"].lower() == last_lower and e["node"]["numRatings"] > 0
+        if last_tokens.issubset(set(e["node"]["lastName"].lower().split()))
+        and e["node"]["numRatings"] > 0
     ]
     if not candidates:
         with _lock:
