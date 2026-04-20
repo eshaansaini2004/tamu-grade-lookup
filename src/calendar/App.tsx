@@ -125,7 +125,7 @@ export default function App() {
     : Object.values(allSections);
 
   async function handleAddSchedule() {
-    const name = `Plan ${String.fromCharCode(65 + schedules.length)}`;
+    const name = `Plan ${schedules.length < 26 ? String.fromCharCode(65 + schedules.length) : schedules.length + 1}`;
     const sched: Schedule = { id: genId(), name, sectionCrns: [], createdAt: Date.now() };
     await saveSchedule(sched);
     await setActiveSchedule(sched.id);

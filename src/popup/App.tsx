@@ -6,7 +6,7 @@ import { findConflicts } from '../shared/conflictDetection';
 import type { SavedSection, Schedule, ApiSection, SectionStatus } from '../shared/types';
 
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
-const DEFAULT_TERM = 'Spring 2026 - College Station';
+const DEFAULT_TERM = 'Fall 2026 - College Station';
 
 const TERMS = [
   'Fall 2026 - College Station',

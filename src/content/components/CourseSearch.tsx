@@ -1,7 +1,7 @@
 import { createElement, useEffect, useRef, useState } from 'react';
 import { sendCourseSearch } from '../../shared/messages';
 import type { RankedInstructor } from '../../shared/messages';
-import type { ApiMeeting, ApiSection, MeetingTime, SavedSection } from '../../shared/types';
+import type { ApiSection, MeetingTime, SavedSection } from '../../shared/types';
 import { saveSection } from '../../shared/storage';
 import { parseMeetingFromApi } from '../../shared/conflictDetection';
 import { parseName } from '../../shared/nameMatch';
@@ -12,7 +12,7 @@ const SCHEDULER_BASE = 'https://tamu.collegescheduler.com';
 
 function getTerm(): string {
   const m = location.pathname.match(/\/terms\/([^/]+)\//);
-  return m ? decodeURIComponent(m[1]) : 'Spring 2026 - College Station';
+  return m ? decodeURIComponent(m[1]) : 'Fall 2026 - College Station';
 }
 
 async function addCourseToBuilder(dept: string, number: string): Promise<boolean> {
