@@ -406,7 +406,7 @@ function PopupInstructorCard({
     const sectionCrns = mySections.map((s) => s.registrationNumber);
     const ok = await sendAddCourseToBuilder(dept, number, term, sectionCrns);
     setAddState(ok ? 'done' : 'err');
-    if (!ok) setErrMsg('Failed — visit Schedule Builder once to refresh auth');
+    if (!ok) setErrMsg('Failed — are you signed into Schedule Builder?');
   }
 
   const addLabel = addState === 'loading' ? '…' : addState === 'done' ? 'Added ✓' : addState === 'err' ? 'Failed' : '+ Builder';
