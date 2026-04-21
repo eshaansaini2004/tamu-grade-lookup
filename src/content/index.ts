@@ -540,9 +540,7 @@ console.log('[TRP] instructor <li>s found on initial scan:', findInstructorLis(d
   const m = location.pathname.match(/\/terms\/([^/]+)\//);
   if (m) chrome.storage.local.set({ currentTerm: decodeURIComponent(m[1]) });
 
-  // RF-Token is ASP.NET's anti-forgery token — background SW includes it on POSTs
-  const el = document.querySelector<HTMLInputElement>('input[name="__RequestVerificationToken"]');
-  if (el?.value) chrome.storage.local.set({ rfToken: el.value });
+
 })();
 
 // ─── floating course search panel ─────────────────────────────────────────────

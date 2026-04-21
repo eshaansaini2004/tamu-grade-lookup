@@ -5,7 +5,7 @@ export default defineManifest({
   name: 'TAMU Registration+',
   version: '1.0.0',
   description: 'GPA, grade distribution, and RMP ratings inside Schedule Builder',
-  permissions: ['storage', 'tabs'],
+  permissions: ['storage', 'tabs', 'scripting'],
   host_permissions: [
     '*://tamu.collegescheduler.com/*',
     '*://grades.adibarra.com/*',

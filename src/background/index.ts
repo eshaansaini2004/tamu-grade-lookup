@@ -130,24 +130,103 @@ async function fetchRmp(instructorName: string, dept: string): Promise<RmpData |
   return result;
 }
 
-// ─── XSRF token helper ───────────────────────────────────────────────────────
+// ─── tab injection helper ─────────────────────────────────────────────────────
 
-// Fetches a fresh X-XSRF-Token from the page HTML. Background SW can do this
-// because host_permissions lets it make credentialed GETs. Falls back to the
-// value cached by the content script in chrome.storage.local.
-async function fetchXsrfToken(): Promise<string | null> {
-  try {
-    const res = await fetch(`${SCHEDULER_BASE}/entry`, { credentials: 'include' });
-    if (res.ok) {
-      const html = await res.text();
-      const m = html.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/i)
-             ?? html.match(/value="([^"]+)"[^>]*name="__RequestVerificationToken"/i);
-      if (m?.[1]) return m[1];
+function waitForTabLoad(tabId: number, timeoutMs = 15000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('tab load timeout'));
+    }, timeoutMs);
+    function listener(id: number, info: chrome.tabs.TabChangeInfo) {
+      if (id === tabId && info.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
     }
-  } catch { /* fall through to cached */ }
+    // Register listener before checking current state to avoid a race where
+    // the tab finishes loading between create() and addListener().
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.get(tabId).then((tab) => {
+      if (tab.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }).catch(() => {});
+  });
+}
 
-  const stored = await chrome.storage.local.get('rfToken');
-  return (stored.rfToken as string | undefined) ?? null;
+// Injects the add-course fetch into a Schedule Builder tab. The fetch runs in
+// the page's origin context, which is what bypasses ASP.NET anti-forgery.
+async function addCourseViaTab(
+  dept: string,
+  number: string,
+  term: string,
+  sectionCrns: string[],
+): Promise<boolean> {
+  const existing = await chrome.tabs.query({ url: '*://tamu.collegescheduler.com/*' });
+  let tabId: number;
+  let opened = false;
+
+  if (existing.length > 0 && existing[0].id != null) {
+    tabId = existing[0].id;
+  } else {
+    const tab = await chrome.tabs.create({ url: `${SCHEDULER_BASE}/entry`, active: false });
+    if (tab.id == null) return false;
+    tabId = tab.id;
+    opened = true;
+  }
+
+  await waitForTabLoad(tabId);
+
+  // Guard against the tab navigating away while we were waiting.
+  const check = await chrome.tabs.get(tabId);
+  if (!check.url?.includes('tamu.collegescheduler.com')) return false;
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (dept: string, number: string, term: string, sectionCrns: string[]) => {
+        const BASE = 'https://tamu.collegescheduler.com';
+        const termEnc = encodeURIComponent(term);
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        };
+        try {
+          const res = await fetch(`${BASE}/api/terms/${termEnc}/desiredcourses`, {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null }),
+          });
+          if (!res.ok) return false;
+          const course = (await res.json()) as { id?: number };
+          if (course.id && sectionCrns.length) {
+            await Promise.all(
+              sectionCrns.map((crn) =>
+                fetch(`${BASE}/api/terms/${termEnc}/desiredcourses/${course.id}/lock`, {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers,
+                  body: JSON.stringify({ registrationNumber: crn }),
+                }).catch(() => {}),
+              ),
+            );
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      args: [dept, number, term, sectionCrns],
+    });
+    return results[0]?.result === true;
+  } finally {
+    if (opened) chrome.tabs.remove(tabId).catch(() => {});
+  }
 }
 
 // ─── message handler ──────────────────────────────────────────────────────────
@@ -230,46 +309,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     };
     (async () => {
       try {
-        // The Angular bundle sends X-XSRF-Token (not RF-Token) with the value from
-        // the hidden __RequestVerificationToken input. GET requests work fine without it;
-        // POSTs require it for ASP.NET anti-forgery validation.
-        const xsrfToken = await fetchXsrfToken();
-
-        const termEnc = encodeURIComponent(term);
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        };
-        if (xsrfToken) headers['X-XSRF-Token'] = xsrfToken;
-
-        const res = await fetch(`${SCHEDULER_BASE}/api/terms/${termEnc}/desiredcourses`, {
-          method: 'POST',
-          credentials: 'include',
-          headers,
-          body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null }),
-        });
-
-        if (!res.ok) { sendResponse({ ok: false } satisfies AddCourseResponse); return; }
-
-        const course = await res.json() as { id?: number };
-        const courseId = course.id;
-
-        // Best-effort: lock to this prof's sections
-        if (courseId && sectionCrns.length) {
-          await Promise.all(
-            sectionCrns.map((crn) =>
-              fetch(`${SCHEDULER_BASE}/api/terms/${termEnc}/desiredcourses/${courseId}/lock`, {
-                method: 'POST',
-                credentials: 'include',
-                headers,
-                body: JSON.stringify({ registrationNumber: crn }),
-              }).catch(() => {})
-            )
-          );
-        }
-
-        sendResponse({ ok: true } satisfies AddCourseResponse);
+        const ok = await addCourseViaTab(dept, number, term, sectionCrns);
+        sendResponse({ ok } satisfies AddCourseResponse);
       } catch (e) {
         console.error('ADD_COURSE_TO_BUILDER error:', e);
         sendResponse({ ok: false } satisfies AddCourseResponse);
