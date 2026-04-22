@@ -15,14 +15,17 @@ function getTerm(): string {
   return m ? decodeURIComponent(m[1]) : 'Fall 2026 - College Station';
 }
 
-async function addCourseToBuilder(dept: string, number: string): Promise<boolean> {
+async function addCourseToBuilder(dept: string, number: string, crnsToExclude: string[]): Promise<boolean> {
   const term = encodeURIComponent(getTerm());
+  const filterRules = crnsToExclude.length
+    ? [{ type: 'registrationNumber', values: crnsToExclude, value: null, excluded: true }]
+    : [];
   try {
     const res = await fetch(`${SCHEDULER_BASE}/api/terms/${term}/desiredcourses`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-      body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null }),
+      body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null, filterRules }),
     });
     return res.ok;
   } catch {
@@ -185,7 +188,9 @@ function InstructorCard({
 
   async function handleAddToBuilder() {
     setAddState('loading');
-    const ok = await addCourseToBuilder(dept, number);
+    const profCrns = new Set(mySections.map((s) => s.registrationNumber));
+    const crnsToExclude = sections.filter((s) => !profCrns.has(s.registrationNumber)).map((s) => s.registrationNumber);
+    const ok = await addCourseToBuilder(dept, number, crnsToExclude);
     setAddState(ok ? 'done' : 'err');
   }
 

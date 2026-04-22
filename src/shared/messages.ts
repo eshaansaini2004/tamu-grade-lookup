@@ -7,7 +7,7 @@ export type Message =
   | { type: 'GET_PAGE_STATS' }
   | { type: 'COURSE_SEARCH'; dept: string; number: string }
   | { type: 'FETCH_SECTIONS'; dept: string; number: string; term: string }
-  | { type: 'ADD_COURSE_TO_BUILDER'; dept: string; number: string; term: string; sectionCrns: string[] }
+  | { type: 'ADD_COURSE_TO_BUILDER'; dept: string; number: string; term: string; crnsToExclude: string[] }
   | { type: 'REFRESH_SECTIONS'; term: string };
 
 export interface RankedInstructor {
@@ -98,12 +98,12 @@ export function sendAddCourseToBuilder(
   dept: string,
   number: string,
   term: string,
-  sectionCrns: string[],
+  crnsToExclude: string[],
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 12_000);
+    const timer = setTimeout(() => resolve(false), 20_000);
     chrome.runtime.sendMessage(
-      { type: 'ADD_COURSE_TO_BUILDER', dept, number, term, sectionCrns } satisfies Message,
+      { type: 'ADD_COURSE_TO_BUILDER', dept, number, term, crnsToExclude } satisfies Message,
       (response: AddCourseResponse) => {
         clearTimeout(timer);
         if (chrome.runtime.lastError || !response) {
