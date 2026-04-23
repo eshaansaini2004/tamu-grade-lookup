@@ -520,6 +520,19 @@ function SearchTab() {
 
   const [dept, number] = searchedCourse ? searchedCourse.split(' ') : ['', ''];
 
+  // Filter to only profs with a current section. Fall back to all if sections didn't load.
+  const visibleInstructors = sections.length > 0
+    ? instructors.filter((inst) => {
+        const lastName = inst.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+        return sections.some((s) =>
+          (s.instructor ?? []).some((i) => {
+            const iLast = i.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+            return iLast === lastName;
+          }),
+        );
+      })
+    : instructors;
+
   return (
     <>
       <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid #1f2937' }}>
@@ -583,15 +596,15 @@ function SearchTab() {
       </div>
       <div style={{ maxHeight: 380, overflowY: 'auto', padding: '10px 12px' }}>
         {loading && <div style={{ fontSize: 11, color: '#6b7280' }}>Fetching…</div>}
-        {!loading && instructors.length === 0 && searchedCourse && (
-          <div style={{ fontSize: 11, color: '#6b7280' }}>No grade data found for this course.</div>
+        {!loading && visibleInstructors.length === 0 && searchedCourse && (
+          <div style={{ fontSize: 11, color: '#6b7280' }}>No instructors found for this course this term.</div>
         )}
-        {!loading && instructors.length > 0 && (
+        {!loading && visibleInstructors.length > 0 && (
           <>
             <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 8 }}>
-              {instructors.length} instructor{instructors.length !== 1 ? 's' : ''} · {searchedCourse} · ranked by GPA + RMP
+              {visibleInstructors.length} instructor{visibleInstructors.length !== 1 ? 's' : ''} · {searchedCourse} · ranked by GPA + RMP
             </div>
-            {instructors.map((inst) => (
+            {visibleInstructors.map((inst) => (
               <PopupInstructorCard
                 key={inst.name}
                 instructor={inst}
