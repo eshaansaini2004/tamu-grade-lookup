@@ -17,6 +17,9 @@ function getTerm(): string {
 
 async function addCourseToBuilder(dept: string, number: string, crnsToExclude: string[]): Promise<boolean> {
   const term = encodeURIComponent(getTerm());
+  const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement | null)?.value ?? '';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+  if (token) headers['X-XSRF-Token'] = token;
   const filterRules = crnsToExclude.length
     ? [{ type: 'registrationNumber', values: crnsToExclude, value: null, excluded: true }]
     : [];
@@ -24,7 +27,7 @@ async function addCourseToBuilder(dept: string, number: string, crnsToExclude: s
     const res = await fetch(`${SCHEDULER_BASE}/api/terms/${term}/desiredcourses`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      headers,
       body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null, filterRules }),
     });
     return res.ok;

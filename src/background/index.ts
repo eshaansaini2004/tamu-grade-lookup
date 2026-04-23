@@ -191,10 +191,12 @@ async function addCourseViaTab(
       func: async (dept: string, number: string, term: string, crnsToExclude: string[]) => {
         const BASE = 'https://tamu.collegescheduler.com';
         const termEnc = encodeURIComponent(term);
-        const headers = {
+        const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement | null)?.value ?? '';
+        const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           'X-Requested-With': 'XMLHttpRequest',
         };
+        if (token) headers['X-XSRF-Token'] = token;
         const filterRules = crnsToExclude.length
           ? [{ type: 'registrationNumber', values: crnsToExclude, value: null, excluded: true }]
           : [];
