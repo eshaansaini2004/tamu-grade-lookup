@@ -207,27 +207,69 @@ function formatRelativeTime(ts: number): string {
 
 function SavedTab({
   sections,
+  schedules,
   onRemove,
   onColorChange,
   onRefresh,
+  onImport,
 }: {
   sections: SavedSection[];
+  schedules: Schedule[];
   onRemove: (crn: string) => void;
   onColorChange: (crn: string, color: string) => void;
   onRefresh: () => Promise<boolean>;
+  onImport: (file: File) => Promise<string | null>;
 }) {
   const [pickerCrn, setPickerCrn] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [cooldownActive, setCooldownActive] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  const [importError, setImportError] = useState('');
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => { if (cooldownTimer.current) clearTimeout(cooldownTimer.current); };
   }, []);
 
+  function handleExport() {
+    const sectionsMap: Record<string, SavedSection> = {};
+    for (const s of sections) sectionsMap[s.crn] = s;
+    const payload = { version: 1, exportedAt: new Date().toISOString(), savedSections: sectionsMap, schedules };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tamu-schedule-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImportError('');
+    const err = await onImport(file);
+    if (err) setImportError(err);
+  }
+
   if (sections.length === 0) {
-    return <div style={C.empty}>No saved sections yet.<br />Click ☆ on any section to save it.</div>;
+    return (
+      <>
+        <div style={C.empty}>No saved sections yet.<br />Click ☆ on any section to save it.</div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+          <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileChange} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{ fontSize: 10, padding: '3px 8px', background: 'none', border: '1px solid #374151', borderRadius: 5, color: '#9ca3af', cursor: 'pointer' }}
+          >
+            Import JSON
+          </button>
+          {importError && <span style={{ fontSize: 10, color: '#f87171', alignSelf: 'center' }}>{importError}</span>}
+        </div>
+      </>
+    );
   }
 
   const conflicts = findConflicts(sections);
@@ -249,7 +291,7 @@ function SavedTab({
   return (
     <>
       {/* Refresh row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: 10, color: refreshError ? '#f87171' : '#4b5563' }}>
           {refreshError
             ? 'Refresh failed — visit Schedule Builder'
@@ -277,6 +319,26 @@ function SavedTab({
         >
           {refreshing ? '↻ …' : '↻ Refresh'}
         </button>
+      </div>
+
+      {/* Export / Import row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileChange} />
+        <button
+          onClick={handleExport}
+          title="Download all sections and schedules as JSON"
+          style={{ fontSize: 10, padding: '3px 8px', background: 'none', border: '1px solid #374151', borderRadius: 5, color: '#9ca3af', cursor: 'pointer' }}
+        >
+          Export JSON
+        </button>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          title="Restore sections and schedules from a backup file"
+          style={{ fontSize: 10, padding: '3px 8px', background: 'none', border: '1px solid #374151', borderRadius: 5, color: '#9ca3af', cursor: 'pointer' }}
+        >
+          Import JSON
+        </button>
+        {importError && <span style={{ fontSize: 10, color: '#f87171' }}>{importError}</span>}
       </div>
 
       {conflicts.size > 0 && (
@@ -687,6 +749,38 @@ export default function App() {
     return result !== null && !result.error;
   };
 
+  // Returns an error string on failure, null on success
+  const handleImport = async (file: File): Promise<string | null> => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      return 'Invalid JSON file';
+    }
+    if (typeof parsed !== 'object' || parsed === null) return 'Invalid file format';
+    const p = parsed as Record<string, unknown>;
+    if (p.version !== 1) return 'Unsupported file version';
+    if (typeof p.savedSections !== 'object' || p.savedSections === null || Array.isArray(p.savedSections))
+      return 'Missing or invalid savedSections';
+    if (!Array.isArray(p.schedules)) return 'Missing or invalid schedules';
+    const sectionValues = Object.values(p.savedSections as Record<string, unknown>);
+    for (const s of sectionValues) {
+      const sec = s as Record<string, unknown>;
+      if (typeof sec.crn !== 'string' || typeof sec.dept !== 'string' || !Array.isArray(sec.meetingTimes))
+        return 'Corrupt section data in file';
+    }
+    const overwrite = window.confirm(
+      `Import will replace your ${savedSections.length} saved section(s) and ${schedules.length} schedule(s). Continue?`
+    );
+    if (!overwrite) return null;
+    await chrome.storage.local.set({
+      savedSections: p.savedSections,
+      schedules: p.schedules,
+      activeScheduleId: null,
+    });
+    return null;
+  };
+
   const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;
 
   return (
@@ -715,7 +809,7 @@ export default function App() {
       ) : (
         <div style={C.body}>
           {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
-          {tab === 'saved' && <SavedTab sections={savedSections} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} />}
+          {tab === 'saved' && <SavedTab sections={savedSections} schedules={schedules} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} onImport={handleImport} />}
         </div>
       )}
 
