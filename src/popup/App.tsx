@@ -403,8 +403,9 @@ function PopupInstructorCard({
   async function handleAdd() {
     setAddState('loading');
     setErrMsg('');
-    const sectionCrns = mySections.map((s) => s.registrationNumber);
-    const ok = await sendAddCourseToBuilder(dept, number, term, sectionCrns);
+    const profCrns = new Set(mySections.map((s) => s.registrationNumber));
+    const crnsToExclude = sections.filter((s) => !profCrns.has(s.registrationNumber)).map((s) => s.registrationNumber);
+    const ok = await sendAddCourseToBuilder(dept, number, term, crnsToExclude);
     setAddState(ok ? 'done' : 'err');
     if (!ok) setErrMsg('Failed — are you signed into Schedule Builder?');
   }

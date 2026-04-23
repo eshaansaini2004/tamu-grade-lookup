@@ -164,7 +164,7 @@ async function addCourseViaTab(
   dept: string,
   number: string,
   term: string,
-  sectionCrns: string[],
+  crnsToExclude: string[],
 ): Promise<boolean> {
   const existing = await chrome.tabs.query({ url: '*://tamu.collegescheduler.com/*' });
   let tabId: number;
@@ -188,40 +188,29 @@ async function addCourseViaTab(
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: async (dept: string, number: string, term: string, sectionCrns: string[]) => {
+      func: async (dept: string, number: string, term: string, crnsToExclude: string[]) => {
         const BASE = 'https://tamu.collegescheduler.com';
         const termEnc = encodeURIComponent(term);
         const headers = {
           'Content-Type': 'application/json',
           'X-Requested-With': 'XMLHttpRequest',
         };
+        const filterRules = crnsToExclude.length
+          ? [{ type: 'registrationNumber', values: crnsToExclude, value: null, excluded: true }]
+          : [];
         try {
           const res = await fetch(`${BASE}/api/terms/${termEnc}/desiredcourses`, {
             method: 'POST',
             credentials: 'include',
             headers,
-            body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null }),
+            body: JSON.stringify({ number, subjectId: dept.toUpperCase(), topic: null, filterRules }),
           });
-          if (!res.ok) return false;
-          const course = (await res.json()) as { id?: number };
-          if (course.id && sectionCrns.length) {
-            await Promise.all(
-              sectionCrns.map((crn) =>
-                fetch(`${BASE}/api/terms/${termEnc}/desiredcourses/${course.id}/lock`, {
-                  method: 'POST',
-                  credentials: 'include',
-                  headers,
-                  body: JSON.stringify({ registrationNumber: crn }),
-                }).catch(() => {}),
-              ),
-            );
-          }
-          return true;
+          return res.ok;
         } catch {
           return false;
         }
       },
-      args: [dept, number, term, sectionCrns],
+      args: [dept, number, term, crnsToExclude],
     });
     return results[0]?.result === true;
   } finally {
@@ -300,16 +289,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'ADD_COURSE_TO_BUILDER') {
-    const { dept, number, term, sectionCrns } = msg as {
+    const { dept, number, term, crnsToExclude } = msg as {
       type: 'ADD_COURSE_TO_BUILDER';
       dept: string;
       number: string;
       term: string;
-      sectionCrns: string[];
+      crnsToExclude: string[];
     };
     (async () => {
       try {
-        const ok = await addCourseViaTab(dept, number, term, sectionCrns);
+        const ok = await addCourseViaTab(dept, number, term, crnsToExclude);
         sendResponse({ ok } satisfies AddCourseResponse);
       } catch (e) {
         console.error('ADD_COURSE_TO_BUILDER error:', e);
