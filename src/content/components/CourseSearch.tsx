@@ -181,10 +181,10 @@ function InstructorCard({
   const [addState, setAddState] = useState<'idle' | 'loading' | 'done' | 'err'>('idle');
   const { gradeData, rmpData } = instructor;
   // Match by last name exact word — avoids "Smith" matching "Smithson"
-  const lastName = instructor.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+  const lastName = instructor.name.split(/[\s,]+/).filter(Boolean)[0]?.toLowerCase() ?? '';
   const mySections = sections.filter((s) =>
     (s.instructor ?? []).some((i) => {
-      const iLast = i.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+      const iLast = i.name.split(/[\s,]+/).filter(Boolean)[0]?.toLowerCase() ?? '';
       return iLast === lastName;
     })
   );

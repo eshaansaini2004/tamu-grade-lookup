@@ -392,10 +392,10 @@ function PopupInstructorCard({
   const [errMsg, setErrMsg] = useState('');
   const { gradeData, rmpData } = instructor;
 
-  const lastName = instructor.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+  const lastName = instructor.name.split(/[\s,]+/).filter(Boolean)[0]?.toLowerCase() ?? '';
   const mySections = sections.filter((s) =>
     (s.instructor ?? []).some((i) => {
-      const iLast = i.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+      const iLast = i.name.split(/[\s,]+/).filter(Boolean)[0]?.toLowerCase() ?? '';
       return iLast === lastName;
     })
   );
@@ -523,10 +523,10 @@ function SearchTab() {
   // Filter to only profs with a current section. Fall back to all if sections didn't load.
   const visibleInstructors = sections.length > 0
     ? instructors.filter((inst) => {
-        const lastName = inst.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+        const lastName = inst.name.split(/[\s,]+/).filter(Boolean)[0]?.toLowerCase() ?? '';
         return sections.some((s) =>
           (s.instructor ?? []).some((i) => {
-            const iLast = i.name.split(/[\s,]+/).filter(Boolean).pop()?.toLowerCase() ?? '';
+            const iLast = i.name.split(/[\s,]+/).filter(Boolean)[0]?.toLowerCase() ?? '';
             return iLast === lastName;
           }),
         );
