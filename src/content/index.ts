@@ -223,7 +223,12 @@ function buildTooltip(gradeData: GradeData | null, rmpData: RmpData | null): str
   return html || 'No data available';
 }
 
-function injectBadge(nameSpan: Element, gradeData: GradeData | null, rmpData: RmpData | null) {
+function injectBadge(
+  nameSpan: Element,
+  gradeData: GradeData | null,
+  rmpData: RmpData | null,
+  courseCtx?: { dept: string; number: string },
+) {
   if ((nameSpan.nextElementSibling as HTMLElement | null)?.hasAttribute(BADGE_ATTR)) return;
 
   const badge = document.createElement('span');
@@ -248,6 +253,8 @@ function injectBadge(nameSpan: Element, gradeData: GradeData | null, rmpData: Rm
   nameSpan.after(badge);
 
   const { last: lastName } = parseName(nameSpan.textContent?.trim() ?? '');
+  let lastInserted: Element = badge;
+
   if (lastName) {
     const cisLink = document.createElement('a');
     cisLink.className = 'trp-cis-link';
@@ -255,7 +262,20 @@ function injectBadge(nameSpan: Element, gradeData: GradeData | null, rmpData: Rm
     cisLink.target = '_blank';
     cisLink.rel = 'noopener noreferrer';
     cisLink.textContent = 'CIS';
-    badge.after(cisLink);
+    lastInserted.after(cisLink);
+    lastInserted = cisLink;
+  }
+
+  if (lastName) {
+    const syllabiUrl = new URL('https://library.tamu.edu/services/faculty-services/course-reserves/syllabi.html');
+    if (courseCtx) syllabiUrl.searchParams.set('q', `${lastName} ${courseCtx.dept} ${courseCtx.number}`);
+    const syllabusLink = document.createElement('a');
+    syllabusLink.className = 'trp-cis-link';
+    syllabusLink.href = syllabiUrl.toString();
+    syllabusLink.target = '_blank';
+    syllabusLink.rel = 'noopener noreferrer';
+    syllabusLink.textContent = 'Syllabus';
+    lastInserted.after(syllabusLink);
   }
 }
 
@@ -290,7 +310,7 @@ function processLi(li: Element) {
 
   sendLookup(ctx.dept, ctx.number, instructorName).then((response) => {
     pending.remove();
-    injectBadge(nameSpan, response.gradeData, response.rmpData);
+    injectBadge(nameSpan, response.gradeData, response.rmpData, { dept: ctx.dept, number: ctx.number });
 
     // Track for Pick Best + inject save button
     if (tbody) {
