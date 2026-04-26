@@ -236,6 +236,14 @@ function SavedTab({
     return () => { if (cooldownTimer.current) clearTimeout(cooldownTimer.current); };
   }, []);
 
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && pickerCrn !== null) setPickerCrn(null);
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [pickerCrn]);
+
   function handleExport() {
     const sectionsMap: Record<string, SavedSection> = {};
     for (const s of sections) sectionsMap[s.crn] = s;
@@ -400,16 +408,24 @@ function SavedTab({
           <div
             key={s.crn}
             draggable
+            tabIndex={0}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             onDragEnd={handleDragEnd}
             onDragLeave={() => setDragOverCrn(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault();
+                onRemove(s.crn);
+              }
+            }}
             style={{
               ...C.savedCard,
               borderColor: isDropTarget ? '#60a5fa' : hasConflict ? '#fca5a5' : '#374151',
               opacity: isDragging ? 0.45 : 1,
               cursor: 'grab',
+              outline: 'none',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', paddingRight: 4, color: '#374151', fontSize: 12, cursor: 'grab', flexShrink: 0 }} title="Drag to reorder">
@@ -583,7 +599,7 @@ function PopupInstructorCard({
   );
 }
 
-function SearchTab() {
+function SearchTab({ focusCount }: { focusCount: number }) {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -591,12 +607,17 @@ function SearchTab() {
   const [sections, setSections] = useState<ApiSection[]>([]);
   const [searchedCourse, setSearchedCourse] = useState('');
   const [term, setTerm] = useState(DEFAULT_TERM);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     chrome.storage.local.get('currentTerm', (r) => {
       if (r.currentTerm) setTerm(r.currentTerm as string);
     });
   }, []);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [focusCount]);
 
   function handleTermChange(newTerm: string) {
     setTerm(newTerm);
@@ -672,6 +693,7 @@ function SearchTab() {
         </select>
         <div style={{ display: 'flex', gap: 6 }}>
           <input
+            ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
@@ -751,6 +773,21 @@ export default function App() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [activeScheduleId, setActiveScheduleId] = useState<string | null>(null);
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
+  const [focusSearchCount, setFocusSearchCount] = useState(0);
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        setTab('search');
+        setFocusSearchCount((n) => n + 1);
+      }
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, []);
 
   useEffect(() => {
     // Load saved sections and order together so reconciliation is consistent
@@ -879,7 +916,7 @@ export default function App() {
       </div>
 
       {tab === 'search' ? (
-        <SearchTab />
+        <SearchTab focusCount={focusSearchCount} />
       ) : (
         <div style={C.body}>
           {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
