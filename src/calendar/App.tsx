@@ -165,6 +165,16 @@ export default function App() {
     setTimeout(() => renameRef.current?.select(), 0);
   }
 
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+      if (e.key === 'F2') { e.preventDefault(); startRename(); }
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [activeSchedule]); // re-bind when active schedule changes so startRename has the current value
+
   // Toggle a CRN in/out of the active schedule — reads fresh from storage to avoid stale state race
   async function handleToggleCrn(crn: string) {
     if (!activeId) return;
