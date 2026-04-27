@@ -45,11 +45,19 @@ export interface Schedule {
   createdAt: number;
 }
 
+export interface Settings {
+  defaultTerm: string;
+  conflictHighlight: boolean;
+  showRmp: boolean;
+  showGradeBars: boolean;
+}
+
 export interface StorageSchema {
   savedSections: Record<string, SavedSection>;
   schedules: Schedule[];
   activeScheduleId: string | null;
   sectionOrder: string[];
+  settings: Settings;
 }
 
 export interface ApiMeeting {
