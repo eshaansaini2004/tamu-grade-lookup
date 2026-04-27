@@ -11,6 +11,7 @@ export default defineManifest({
     '*://grades.adibarra.com/*',
     '*://www.ratemyprofessors.com/*',
     '*://howdyportal.tamu.edu/*',
+    '*://howdy.tamu.edu/*',
   ],
   content_scripts: [
     {

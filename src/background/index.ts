@@ -6,6 +6,9 @@ import type { GradeData, RmpData, ApiSection } from '../shared/types';
 import type { LookupResponse, CourseSearchResponse, RankedInstructor, FetchSectionsResponse, AddCourseResponse, RefreshSectionsResponse } from '../shared/messages';
 
 const SCHEDULER_BASE = 'https://tamu.collegescheduler.com';
+const HOWDY_BASE = 'https://howdyportal.tamu.edu/api';
+const HOWDY_TERM_TTL_MS = 24 * 60 * 60 * 1000;
+const HOWDY_SECTIONS_TTL_MS = 60 * 60 * 1000;
 
 // ─── cache ────────────────────────────────────────────────────────────────────
 
@@ -158,8 +161,6 @@ function waitForTabLoad(tabId: number, timeoutMs = 15000): Promise<void> {
   });
 }
 
-// Injects the add-course fetch into a Schedule Builder tab. The fetch runs in
-// the page's origin context, which is what bypasses ASP.NET anti-forgery.
 async function addCourseViaTab(
   dept: string,
   number: string,
@@ -181,7 +182,6 @@ async function addCourseViaTab(
 
   await waitForTabLoad(tabId);
 
-  // Guard against the tab navigating away while we were waiting.
   const check = await chrome.tabs.get(tabId);
   if (!check.url?.includes('tamu.collegescheduler.com')) return false;
 
@@ -215,6 +215,142 @@ async function addCourseViaTab(
       args: [dept, number, term, crnsToExclude],
     });
     return results[0]?.result === true;
+  } finally {
+    if (opened) chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+// ─── Howdy Portal sections ────────────────────────────────────────────────────
+
+interface HowdyTerm { STVTERM_CODE: string; STVTERM_DESC: string }
+interface HowdySection {
+  SWV_CLASS_SEARCH_CRN?: number | string;
+  SWV_CLASS_SEARCH_SECTION?: string;
+  SWV_CLASS_SEARCH_INSTRCTR_JSON?: string;
+  SWV_CLASS_SEARCH_SUBJECT?: string;
+  SWV_CLASS_SEARCH_COURSE?: string;
+}
+
+// "Elena Nikolova (P)" → "NIKOLOVA E". Strip "(role)", take last token as last name,
+// first letter of first token as initial. Falls back to the trimmed input if it
+// can't be split cleanly.
+function howdyNameToGradeFormat(raw: string): string {
+  const cleaned = raw.replace(/\([^)]*\)/g, '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return 'Staff';
+  const parts = cleaned.split(' ');
+  if (parts.length === 1) return parts[0].toUpperCase();
+  const last = parts[parts.length - 1].toUpperCase();
+  const initial = parts[0][0]?.toUpperCase() ?? '';
+  return initial ? `${last} ${initial}` : last;
+}
+
+async function fetchHowdyTermCode(term: string): Promise<string | null> {
+  const cacheKey = `howdy_term_${term}`;
+  const cached = await cacheGet<string>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 8000);
+    const res = await fetch(`${HOWDY_BASE}/all-terms`, { signal: ac.signal });
+    if (!res.ok) return null;
+    const terms = await res.json() as HowdyTerm[];
+    const needle = term.toLowerCase();
+    const match = terms.find((t) => t.STVTERM_DESC?.toLowerCase().includes(needle))
+      ?? terms.find((t) => needle.includes(t.STVTERM_DESC?.toLowerCase() ?? ''));
+    if (!match) return null;
+    await cacheSet(cacheKey, match.STVTERM_CODE, HOWDY_TERM_TTL_MS);
+    return match.STVTERM_CODE;
+  } catch (e) {
+    console.warn('howdy term lookup failed:', (e as Error).message);
+    return null;
+  }
+}
+
+async function fetchSectionsFromHowdy(
+  dept: string,
+  number: string,
+  term: string,
+): Promise<ApiSection[]> {
+  const termCode = await fetchHowdyTermCode(term);
+  if (!termCode) return [];
+
+  const deptUpper = dept.toUpperCase();
+  const cacheKey = `howdy_sections_v2_${deptUpper}_${number}_${termCode}`;
+  const cached = await cacheGet<ApiSection[]>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  // Howdy API rejects requests from the extension origin (403). Run the fetch
+  // inside a howdyportal.tamu.edu tab so the Origin header is accepted.
+  const existing = await chrome.tabs.query({ url: '*://howdy.tamu.edu/*' });
+  let tabId: number;
+  let opened = false;
+
+  if (existing.length > 0 && existing[0].id != null) {
+    tabId = existing[0].id;
+  } else {
+    const tab = await chrome.tabs.create({ url: 'https://howdy.tamu.edu', active: false });
+    if (tab.id == null) return [];
+    tabId = tab.id;
+    opened = true;
+  }
+
+  try {
+    await waitForTabLoad(tabId);
+    const check = await chrome.tabs.get(tabId);
+    if (!check.url?.includes('howdy.tamu.edu')) return [];
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (base: string, tCode: string, dept: string, num: string) => {
+        try {
+          const res = await fetch(`${base}/course-sections`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startRow: 0, endRow: 0, termCode: tCode, publicSearch: 'Y', subject: dept, courseNumber: num }),
+          });
+          if (!res.ok) return null;
+          return res.json();
+        } catch { return null; }
+      },
+      args: [HOWDY_BASE, termCode, deptUpper, number],
+    });
+
+    const allRows = results[0]?.result as HowdySection[] | null;
+    if (!allRows) return [];
+
+    const rows = allRows.filter((r) =>
+      r.SWV_CLASS_SEARCH_SUBJECT === deptUpper && r.SWV_CLASS_SEARCH_COURSE === number
+    );
+
+    const sections: ApiSection[] = rows.map((row) => {
+      let instructors: { name: string; id?: string }[] = [];
+      const rawJson = row.SWV_CLASS_SEARCH_INSTRCTR_JSON;
+      if (rawJson) {
+        try {
+          const parsed = JSON.parse(rawJson) as { NAME?: string }[];
+          instructors = parsed
+            .map((p) => howdyNameToGradeFormat(p.NAME ?? ''))
+            .filter((n) => n.length > 0)
+            .map((name) => ({ name, id: '' }));
+        } catch {
+          instructors = [];
+        }
+      }
+      if (instructors.length === 0) instructors = [{ name: 'Staff', id: '' }];
+      return {
+        registrationNumber: String(row.SWV_CLASS_SEARCH_CRN ?? ''),
+        sectionNumber: row.SWV_CLASS_SEARCH_SECTION,
+        instructor: instructors,
+        meetings: [],
+      };
+    }).filter((s) => s.registrationNumber);
+
+    await cacheSet(cacheKey, sections, HOWDY_SECTIONS_TTL_MS);
+    return sections;
+  } catch (e) {
+    console.warn('howdy sections fetch failed:', (e as Error).message);
+    return [];
   } finally {
     if (opened) chrome.tabs.remove(tabId).catch(() => {});
   }
@@ -278,11 +414,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const { dept, number, term } = msg as { type: 'FETCH_SECTIONS'; dept: string; number: string; term: string };
     (async () => {
       try {
-        const url = `${SCHEDULER_BASE}/api/terms/${encodeURIComponent(term)}/subjects/${dept.toUpperCase()}/courses/${number}/regblocks`;
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) { sendResponse({ sections: [] } satisfies FetchSectionsResponse); return; }
-        const data = await res.json() as { sections?: ApiSection[] };
-        sendResponse({ sections: data.sections ?? [] } satisfies FetchSectionsResponse);
+        const sections = await fetchSectionsFromHowdy(dept, number, term);
+        sendResponse({ sections } satisfies FetchSectionsResponse);
       } catch {
         sendResponse({ sections: [] } satisfies FetchSectionsResponse);
       }
