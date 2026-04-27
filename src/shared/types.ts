@@ -49,6 +49,7 @@ export interface StorageSchema {
   savedSections: Record<string, SavedSection>;
   schedules: Schedule[];
   activeScheduleId: string | null;
+  sectionOrder: string[];
 }
 
 export interface ApiMeeting {

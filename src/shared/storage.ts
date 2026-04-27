@@ -4,6 +4,7 @@ const DEFAULTS: StorageSchema = {
   savedSections: {},
   schedules: [],
   activeScheduleId: null,
+  sectionOrder: [],
 };
 
 export async function storageGet<K extends keyof StorageSchema>(key: K): Promise<StorageSchema[K]> {
@@ -77,6 +78,10 @@ export async function deleteSchedule(id: string): Promise<void> {
 
 export async function setActiveSchedule(id: string | null): Promise<void> {
   await storageSet('activeScheduleId', id);
+}
+
+export async function saveSectionOrder(order: string[]): Promise<void> {
+  await storageSet('sectionOrder', order);
 }
 
 // Atomic toggle of a CRN within a schedule — avoids stale-closure race

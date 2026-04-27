@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder, sendRefreshSections } from '../shared/messages';
 import type { PageStats, RankedInstructor } from '../shared/messages';
-import { storageGet, removeSection, saveSection, storageOnChanged } from '../shared/storage';
+import { storageGet, removeSection, saveSection, saveSectionOrder, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
 import type { SavedSection, Schedule, ApiSection, SectionStatus } from '../shared/types';
 
@@ -212,6 +212,7 @@ function SavedTab({
   onColorChange,
   onRefresh,
   onImport,
+  onReorder,
 }: {
   sections: SavedSection[];
   schedules: Schedule[];
@@ -219,12 +220,15 @@ function SavedTab({
   onColorChange: (crn: string, color: string) => void;
   onRefresh: () => Promise<boolean>;
   onImport: (file: File) => Promise<string | null>;
+  onReorder: (newOrder: string[]) => void;
 }) {
   const [pickerCrn, setPickerCrn] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [cooldownActive, setCooldownActive] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
   const [importError, setImportError] = useState('');
+  const [draggedCrn, setDraggedCrn] = useState<string | null>(null);
+  const [dragOverCrn, setDragOverCrn] = useState<string | null>(null);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -358,11 +362,59 @@ function SavedTab({
         const hasConflict = conflicts.has(s.crn);
         const currentColor = s.color ?? autoColor(s.dept, s.courseNumber);
         const isPickerOpen = pickerCrn === s.crn;
+        const isDragging = draggedCrn === s.crn;
+        const isDropTarget = dragOverCrn === s.crn && draggedCrn !== s.crn;
+
+        function handleDragStart(e: React.DragEvent) {
+          e.dataTransfer.effectAllowed = 'move';
+          setDraggedCrn(s.crn);
+        }
+
+        function handleDragOver(e: React.DragEvent) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDragOverCrn(s.crn);
+        }
+
+        function handleDrop(e: React.DragEvent) {
+          e.preventDefault();
+          if (!draggedCrn || draggedCrn === s.crn) return;
+          const crns = sections.map((sec) => sec.crn);
+          const fromIdx = crns.indexOf(draggedCrn);
+          const toIdx = crns.indexOf(s.crn);
+          if (fromIdx < 0 || toIdx < 0) return;
+          const next = [...crns];
+          next.splice(fromIdx, 1);
+          next.splice(toIdx, 0, draggedCrn);
+          onReorder(next);
+          setDraggedCrn(null);
+          setDragOverCrn(null);
+        }
+
+        function handleDragEnd() {
+          setDraggedCrn(null);
+          setDragOverCrn(null);
+        }
+
         return (
-          <div key={s.crn} style={{
-            ...C.savedCard,
-            borderColor: hasConflict ? '#fca5a5' : '#374151',
-          }}>
+          <div
+            key={s.crn}
+            draggable
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            onDragLeave={() => setDragOverCrn(null)}
+            style={{
+              ...C.savedCard,
+              borderColor: isDropTarget ? '#60a5fa' : hasConflict ? '#fca5a5' : '#374151',
+              opacity: isDragging ? 0.45 : 1,
+              cursor: 'grab',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', paddingRight: 4, color: '#374151', fontSize: 12, cursor: 'grab', flexShrink: 0 }} title="Drag to reorder">
+              ⠿
+            </div>
             <div style={C.savedCardInfo}>
               <div style={C.savedCourse}>
                 {hasConflict && <span style={{ color: '#f87171', marginRight: 5 }}>⚠</span>}
@@ -698,11 +750,13 @@ export default function App() {
   const [savedSections, setSavedSections] = useState<SavedSection[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [activeScheduleId, setActiveScheduleId] = useState<string | null>(null);
+  const [sectionOrder, setSectionOrder] = useState<string[]>([]);
 
   useEffect(() => {
-    // Load saved sections
-    storageGet('savedSections').then((saved) => {
+    // Load saved sections and order together so reconciliation is consistent
+    Promise.all([storageGet('savedSections'), storageGet('sectionOrder')]).then(([saved, order]) => {
       setSavedSections(Object.values(saved));
+      setSectionOrder(order);
     });
     storageGet('schedules').then(setSchedules);
     storageGet('activeScheduleId').then(setActiveScheduleId);
@@ -712,6 +766,7 @@ export default function App() {
       if (changes.savedSections !== undefined) {
         setSavedSections(Object.values(changes.savedSections ?? {}));
       }
+      if (changes.sectionOrder !== undefined) setSectionOrder(changes.sectionOrder ?? []);
       if (changes.schedules !== undefined) setSchedules(changes.schedules ?? []);
       if (changes.activeScheduleId !== undefined) setActiveScheduleId(changes.activeScheduleId ?? null);
     });
@@ -783,6 +838,25 @@ export default function App() {
 
   const activeSchedule = schedules.find((s) => s.id === activeScheduleId) ?? null;
 
+  const orderedSections = useMemo(() => {
+    const map = new Map(savedSections.map((s) => [s.crn, s]));
+    const seen = new Set<string>();
+    const result: SavedSection[] = [];
+    for (const crn of sectionOrder) {
+      const s = map.get(crn);
+      if (s) { result.push(s); seen.add(crn); }
+    }
+    for (const s of savedSections) {
+      if (!seen.has(s.crn)) result.push(s);
+    }
+    return result;
+  }, [savedSections, sectionOrder]);
+
+  const handleReorder = async (newOrder: string[]) => {
+    setSectionOrder(newOrder);
+    await saveSectionOrder(newOrder);
+  };
+
   return (
     <div style={C.wrap}>
       <div style={C.header}>
@@ -809,7 +883,7 @@ export default function App() {
       ) : (
         <div style={C.body}>
           {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
-          {tab === 'saved' && <SavedTab sections={savedSections} schedules={schedules} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} onImport={handleImport} />}
+          {tab === 'saved' && <SavedTab sections={orderedSections} schedules={schedules} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} onImport={handleImport} onReorder={handleReorder} />}
         </div>
       )}
 
