@@ -4,8 +4,8 @@ import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { sendLookup } from '../shared/messages';
 import type { PageStats } from '../shared/messages';
-import type { GradeData, MeetingTime, RmpData, SavedSection, SeatData, SectionStatus } from '../shared/types';
-import { storageGet, saveSection, removeSection } from '../shared/storage';
+import type { GradeData, MeetingTime, RmpData, SavedSection, SeatData, SectionStatus, Settings } from '../shared/types';
+import { storageGet, saveSection, removeSection, storageOnChanged } from '../shared/storage';
 import { parseMeetingFromApi } from '../shared/conflictDetection';
 import { parseName } from '../shared/nameMatch';
 import { gpaColorClass } from '../shared/gradeUtils';
@@ -14,6 +14,20 @@ import SectionComparison, { type InstructorData } from './components/SectionComp
 import CourseSearch from './components/CourseSearch';
 
 const BADGE_ATTR = 'data-trp';
+
+// ─── settings cache ───────────────────────────────────────────────────────────
+
+let cachedSettings: Settings = {
+  defaultTerm: 'Fall 2026 - College Station',
+  conflictHighlight: true,
+  showRmp: true,
+  showGradeBars: true,
+};
+
+storageGet('settings').then((s) => { cachedSettings = s; });
+storageOnChanged((changes) => {
+  if (changes.settings) cachedSettings = changes.settings;
+});
 
 // ─── meeting time capture (regblocks fetch intercept) ─────────────────────────
 
@@ -195,7 +209,7 @@ function getCourseFromLi(li: Element): { dept: string; number: string } | null {
 function buildTooltip(gradeData: GradeData | null, rmpData: RmpData | null): string {
   let html = '';
 
-  if (gradeData) {
+  if (gradeData && cachedSettings.showGradeBars) {
     const bars = [
       { label: 'A', pct: gradeData.pctA, cls: 'trp-bar-a' },
       { label: 'B', pct: gradeData.pctB, cls: 'trp-bar-b' },
@@ -214,9 +228,11 @@ function buildTooltip(gradeData: GradeData | null, rmpData: RmpData | null): str
       )
       .join('');
     html += `<div class="trp-meta">GPA ${gradeData.avgGpa.toFixed(2)} · ${gradeData.semCount} semester${gradeData.semCount !== 1 ? 's' : ''}</div>`;
+  } else if (gradeData) {
+    html += `<div class="trp-meta">GPA ${gradeData.avgGpa.toFixed(2)} · ${gradeData.semCount} semester${gradeData.semCount !== 1 ? 's' : ''}</div>`;
   }
 
-  if (rmpData) {
+  if (rmpData && cachedSettings.showRmp) {
     html += `<div class="trp-meta">RMP: ${rmpData.rating.toFixed(1)}/5 (${rmpData.count} ratings)</div>`;
   }
 
@@ -243,9 +259,10 @@ function injectBadge(
     const rmp = rmpData?.rating ?? null;
     const colorClass = gpaColorClass(gradeData?.avgGpa);
 
+    const rmpSpan = rmp != null && cachedSettings.showRmp ? `&nbsp;<span class="trp-rmp">★${rmp.toFixed(1)}</span>` : '';
     badge.className = `trp-badge ${colorClass}`;
     badge.innerHTML = `
-      <span class="trp-pill">GPA&nbsp;${gpa}&nbsp; A:${pctA}%${rmp != null ? `&nbsp;<span class="trp-rmp">★${rmp.toFixed(1)}</span>` : ''}</span>
+      <span class="trp-pill">GPA&nbsp;${gpa}&nbsp; A:${pctA}%${rmpSpan}</span>
       <span class="trp-tooltip">${buildTooltip(gradeData, rmpData)}</span>
     `;
   }
