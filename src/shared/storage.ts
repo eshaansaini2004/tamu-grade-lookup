@@ -5,6 +5,12 @@ const DEFAULTS: StorageSchema = {
   schedules: [],
   activeScheduleId: null,
   sectionOrder: [],
+  settings: {
+    defaultTerm: 'Fall 2026 - College Station',
+    conflictHighlight: true,
+    showRmp: true,
+    showGradeBars: true,
+  },
 };
 
 export async function storageGet<K extends keyof StorageSchema>(key: K): Promise<StorageSchema[K]> {
@@ -82,6 +88,10 @@ export async function setActiveSchedule(id: string | null): Promise<void> {
 
 export async function saveSectionOrder(order: string[]): Promise<void> {
   await storageSet('sectionOrder', order);
+}
+
+export async function saveSettings(settings: import('./types').Settings): Promise<void> {
+  await storageSet('settings', settings);
 }
 
 // Atomic toggle of a CRN within a schedule — avoids stale-closure race
