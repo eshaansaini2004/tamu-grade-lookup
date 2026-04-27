@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { sendGetPageStats, sendCourseSearch, sendFetchSections, sendAddCourseToBuilder, sendRefreshSections } from '../shared/messages';
 import type { PageStats, RankedInstructor } from '../shared/messages';
-import { storageGet, removeSection, saveSection, saveSectionOrder, storageOnChanged } from '../shared/storage';
+import { storageGet, removeSection, saveSection, saveSectionOrder, saveSettings, storageOnChanged } from '../shared/storage';
 import { findConflicts } from '../shared/conflictDetection';
-import type { SavedSection, Schedule, ApiSection, SectionStatus } from '../shared/types';
+import type { SavedSection, Schedule, ApiSection, SectionStatus, Settings } from '../shared/types';
 
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
 const DEFAULT_TERM = 'Fall 2026 - College Station';
@@ -15,7 +15,7 @@ const TERMS = [
   'Spring 2025 - College Station',
 ];
 
-type Tab = 'overview' | 'saved' | 'search';
+type Tab = 'overview' | 'saved' | 'search' | 'settings';
 type Status = 'loading' | 'not-on-page' | 'ready';
 
 const C = {
@@ -213,6 +213,7 @@ function SavedTab({
   onRefresh,
   onImport,
   onReorder,
+  settings,
 }: {
   sections: SavedSection[];
   schedules: Schedule[];
@@ -221,6 +222,7 @@ function SavedTab({
   onRefresh: () => Promise<boolean>;
   onImport: (file: File) => Promise<string | null>;
   onReorder: (newOrder: string[]) => void;
+  settings: Settings;
 }) {
   const [pickerCrn, setPickerCrn] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -284,7 +286,7 @@ function SavedTab({
     );
   }
 
-  const conflicts = findConflicts(sections);
+  const conflicts = settings.conflictHighlight ? findConflicts(sections) : new Set<string>();
 
   async function handleRefresh() {
     if (refreshing || cooldownActive) return;
@@ -599,19 +601,20 @@ function PopupInstructorCard({
   );
 }
 
-function SearchTab({ focusCount }: { focusCount: number }) {
+function SearchTab({ focusCount, defaultTerm }: { focusCount: number; defaultTerm: string }) {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [instructors, setInstructors] = useState<RankedInstructor[]>([]);
   const [sections, setSections] = useState<ApiSection[]>([]);
   const [searchedCourse, setSearchedCourse] = useState('');
-  const [term, setTerm] = useState(DEFAULT_TERM);
+  const [term, setTerm] = useState(defaultTerm);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Last manual choice takes precedence; fall back to settings.defaultTerm
     chrome.storage.local.get('currentTerm', (r) => {
-      if (r.currentTerm) setTerm(r.currentTerm as string);
+      setTerm((r.currentTerm as string | undefined) ?? defaultTerm);
     });
   }, []);
 
@@ -765,6 +768,89 @@ function minutesToTime(mins: number): string {
   return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
 }
 
+const SETTINGS_DEFAULT: Settings = {
+  defaultTerm: 'Fall 2026 - College Station',
+  conflictHighlight: true,
+  showRmp: true,
+  showGradeBars: true,
+};
+
+function SettingsTab({
+  settings,
+  onChange,
+}: {
+  settings: Settings;
+  onChange: (patch: Partial<Settings>) => void;
+}) {
+  const row = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 };
+  const label = { fontSize: 11, color: '#d1d5db' };
+  const sub = { fontSize: 10, color: '#6b7280', marginTop: 2 };
+
+  function Toggle({ checked, onToggle }: { checked: boolean; onToggle: () => void }) {
+    return (
+      <button
+        onClick={onToggle}
+        style={{
+          width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer', flexShrink: 0,
+          background: checked ? '#500000' : '#374151',
+          position: 'relative', transition: 'background 0.2s',
+        }}
+      >
+        <span style={{
+          position: 'absolute', top: 2, left: checked ? 18 : 2,
+          width: 16, height: 16, borderRadius: '50%', background: '#f9fafb',
+          transition: 'left 0.2s',
+        }} />
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ padding: '4px 0' }}>
+      <div style={row}>
+        <div>
+          <div style={label}>Default term</div>
+          <div style={sub}>Pre-selected in course search</div>
+        </div>
+        <select
+          value={settings.defaultTerm}
+          onChange={(e) => onChange({ defaultTerm: e.target.value })}
+          style={{
+            background: '#1f2937', border: '1px solid #374151', borderRadius: 5,
+            padding: '4px 6px', fontSize: 10, color: '#9ca3af', outline: 'none', cursor: 'pointer', maxWidth: 130,
+          }}
+        >
+          {TERMS.map((t) => <option key={t} value={t}>{t.replace(' - College Station', '')}</option>)}
+        </select>
+      </div>
+
+      <div style={row}>
+        <div>
+          <div style={label}>Conflict highlight</div>
+          <div style={sub}>Warn when saved sections overlap</div>
+        </div>
+        <Toggle checked={settings.conflictHighlight} onToggle={() => onChange({ conflictHighlight: !settings.conflictHighlight })} />
+      </div>
+
+      <div style={row}>
+        <div>
+          <div style={label}>Show RMP ratings</div>
+          <div style={sub}>★ on schedule builder badges</div>
+        </div>
+        <Toggle checked={settings.showRmp} onToggle={() => onChange({ showRmp: !settings.showRmp })} />
+      </div>
+
+      <div style={row}>
+        <div>
+          <div style={label}>Show grade bars</div>
+          <div style={sub}>A/B/C bars in badge tooltip</div>
+        </div>
+        <Toggle checked={settings.showGradeBars} onToggle={() => onChange({ showGradeBars: !settings.showGradeBars })} />
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [status, setStatus] = useState<Status>('loading');
@@ -774,6 +860,7 @@ export default function App() {
   const [activeScheduleId, setActiveScheduleId] = useState<string | null>(null);
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
   const [focusSearchCount, setFocusSearchCount] = useState(0);
+  const [settings, setSettings] = useState<Settings>(SETTINGS_DEFAULT);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -797,6 +884,7 @@ export default function App() {
     });
     storageGet('schedules').then(setSchedules);
     storageGet('activeScheduleId').then(setActiveScheduleId);
+    storageGet('settings').then(setSettings);
 
     // Listen for changes from content script
     const unsub = storageOnChanged((changes) => {
@@ -806,6 +894,7 @@ export default function App() {
       if (changes.sectionOrder !== undefined) setSectionOrder(changes.sectionOrder ?? []);
       if (changes.schedules !== undefined) setSchedules(changes.schedules ?? []);
       if (changes.activeScheduleId !== undefined) setActiveScheduleId(changes.activeScheduleId ?? null);
+      if (changes.settings !== undefined) setSettings(changes.settings ?? SETTINGS_DEFAULT);
     });
 
     // Load page stats
@@ -894,6 +983,12 @@ export default function App() {
     await saveSectionOrder(newOrder);
   };
 
+  const handleSettingsChange = async (patch: Partial<Settings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    await saveSettings(next);
+  };
+
   return (
     <div style={C.wrap}>
       <div style={C.header}>
@@ -912,15 +1007,17 @@ export default function App() {
             Saved {savedSections.length > 0 ? `(${savedSections.length})` : ''}
           </button>
           <button style={C.tab(tab === 'search')} onClick={() => setTab('search')}>Search</button>
+          <button style={C.tab(tab === 'settings')} onClick={() => setTab('settings')}>⚙</button>
         </div>
       </div>
 
       {tab === 'search' ? (
-        <SearchTab focusCount={focusSearchCount} />
+        <SearchTab focusCount={focusSearchCount} defaultTerm={settings.defaultTerm} />
       ) : (
         <div style={C.body}>
           {tab === 'overview' && <OverviewTab status={status} stats={stats} />}
-          {tab === 'saved' && <SavedTab sections={orderedSections} schedules={schedules} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} onImport={handleImport} onReorder={handleReorder} />}
+          {tab === 'saved' && <SavedTab sections={orderedSections} schedules={schedules} onRemove={handleRemove} onColorChange={handleColorChange} onRefresh={handleRefresh} onImport={handleImport} onReorder={handleReorder} settings={settings} />}
+          {tab === 'settings' && <SettingsTab settings={settings} onChange={handleSettingsChange} />}
         </div>
       )}
 

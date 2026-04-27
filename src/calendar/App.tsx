@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { storageGet, storageOnChanged, saveSchedule, deleteSchedule, setActiveSchedule, toggleCrnInSchedule } from '../shared/storage';
-import type { SavedSection, Schedule } from '../shared/types';
+import type { SavedSection, Schedule, Settings } from '../shared/types';
 import WeeklyGrid from './components/WeeklyGrid';
 
 function genId() {
@@ -98,6 +98,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameVal, setRenameVal] = useState('');
+  const [conflictHighlight, setConflictHighlight] = useState(true);
   const renameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -105,16 +106,19 @@ export default function App() {
       storageGet('savedSections'),
       storageGet('schedules'),
       storageGet('activeScheduleId'),
-    ]).then(([sections, scheds, active]) => {
+      storageGet('settings'),
+    ]).then(([sections, scheds, active, s]) => {
       setAllSections(sections);
       setSchedules(scheds);
       setActiveId(active);
+      setConflictHighlight(s.conflictHighlight);
     });
 
     const unsub = storageOnChanged((changes) => {
       if (changes.savedSections !== undefined) setAllSections(changes.savedSections ?? {});
       if (changes.schedules !== undefined) setSchedules(changes.schedules ?? []);
       if (changes.activeScheduleId !== undefined) setActiveId(changes.activeScheduleId ?? null);
+      if (changes.settings !== undefined) setConflictHighlight(changes.settings?.conflictHighlight ?? true);
     });
     return unsub;
   }, []);
@@ -250,7 +254,7 @@ export default function App() {
               : 'No saved sections. Save sections from Schedule Builder to see them here.'}
           </p>
         ) : (
-          <WeeklyGrid sections={displayedSections} />
+          <WeeklyGrid sections={displayedSections} conflictHighlight={conflictHighlight} />
         )}
       </div>
     </div>

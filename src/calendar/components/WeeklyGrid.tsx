@@ -56,8 +56,8 @@ function blockHeight(startMin: number, endMin: number) {
   return Math.max(((endMin - startMin) / 30) * SLOT_HEIGHT - 2, 18);
 }
 
-export default function WeeklyGrid({ sections }: { sections: SavedSection[] }) {
-  const conflicts = findConflicts(sections);
+export default function WeeklyGrid({ sections, conflictHighlight = true }: { sections: SavedSection[]; conflictHighlight?: boolean }) {
+  const conflicts = conflictHighlight ? findConflicts(sections) : new Set<string>();
   const slots = Array.from({ length: TOTAL_SLOTS }, (_, i) => START_MIN + i * 30);
 
   return (
