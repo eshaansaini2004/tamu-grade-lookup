@@ -539,7 +539,10 @@ function PopupInstructorCard({
     const crnsToExclude = sections.filter((s) => !profCrns.has(s.registrationNumber)).map((s) => s.registrationNumber);
     const ok = await sendAddCourseToBuilder(dept, number, term, crnsToExclude);
     setAddState(ok ? 'done' : 'err');
-    if (!ok) setErrMsg('Failed — are you signed into Schedule Builder?');
+    if (!ok) {
+      setErrMsg('session-expired');
+      setTimeout(() => { setAddState('idle'); setErrMsg(''); }, 5000);
+    }
   }
 
   const addLabel = addState === 'loading' ? '…' : addState === 'done' ? 'Added ✓' : addState === 'err' ? 'Failed' : '+ Builder';
@@ -594,8 +597,20 @@ function PopupInstructorCard({
           {mySections.length > 3 && ` +${mySections.length - 3} more`}
         </div>
       )}
-      {errMsg && (
-        <div style={{ marginTop: 4, fontSize: 9, color: '#f87171' }}>{errMsg}</div>
+      {errMsg === 'session-expired' && (
+        <div style={{ marginTop: 4, fontSize: 9, color: '#f87171' }}>
+          Session expired —{' '}
+          <a
+            href="https://tamu.collegescheduler.com"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: '#f87171', textDecoration: 'underline', cursor: 'pointer' }}
+            onClick={() => chrome.tabs.create({ url: 'https://tamu.collegescheduler.com' })}
+          >
+            sign in to Schedule Builder
+          </a>
+          , then retry.
+        </div>
       )}
     </div>
   );
