@@ -8,6 +8,29 @@ import type { SavedSection, Schedule, ApiSection, SectionStatus, Settings } from
 const SCHEDULER_HOST = 'tamu.collegescheduler.com';
 const DEFAULT_TERM = 'Fall 2026 - College Station';
 
+const CHANGELOG: { version: string; entries: string[] }[] = [
+  {
+    version: '1.1.0',
+    entries: [
+      'What\'s new popup (this one)',
+      'Settings tab: default term, conflict highlight, RMP and grade bar toggles',
+      'Seat availability badges (Open / Waitlist / Full) on saved sections',
+      'Drag-to-reorder saved sections',
+      'Export and import saved sections as JSON',
+      '"Add to Builder" button in the Search tab',
+    ],
+  },
+  {
+    version: '1.0.0',
+    entries: [
+      'Grade distribution badges on Schedule Builder course listings',
+      'RMP rating overlay on instructor names',
+      'Weekly calendar view with color-coded sections',
+      'Save sections and detect time conflicts',
+    ],
+  },
+];
+
 const TERMS = [
   'Fall 2026 - College Station',
   'Spring 2026 - College Station',
@@ -532,6 +555,11 @@ function PopupInstructorCard({
     })
   );
 
+  const sectionsWithSeats = mySections.filter((s) => s.openSeats != null);
+  const totalOpen = mySections.reduce((sum, s) => sum + (s.openSeats ?? 0), 0);
+  const anyOpen = sectionsWithSeats.some((s) => (s.openSeats ?? 0) > 0);
+  const anyWaitlist = !anyOpen && sectionsWithSeats.some((s) => (s.waitlistCount ?? 0) > 0);
+
   async function handleAdd() {
     setAddState('loading');
     setErrMsg('');
@@ -550,8 +578,19 @@ function PopupInstructorCard({
   return (
     <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5, gap: 4 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#f9fafb', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {instructor.name}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#f9fafb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            {instructor.name}
+          </div>
+          {sectionsWithSeats.length > 0 && (
+            <span style={{
+              fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+              background: anyOpen ? '#065f46' : anyWaitlist ? '#78350f' : '#374151',
+              color: anyOpen ? '#34d399' : anyWaitlist ? '#fbbf24' : '#6b7280',
+            }}>
+              {anyOpen ? `${totalOpen} open` : anyWaitlist ? 'Waitlist' : 'Full'}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 800, color: gpaColor(gradeData.avgGpa) }}>
@@ -592,9 +631,28 @@ function PopupInstructorCard({
         </div>
       ))}
       {mySections.length > 0 && (
-        <div style={{ marginTop: 5, fontSize: 9, color: '#6b7280' }}>
-          {mySections.slice(0, 3).map((s) => `CRN ${s.registrationNumber}`).join(' · ')}
-          {mySections.length > 3 && ` +${mySections.length - 3} more`}
+        <div style={{ marginTop: 5 }}>
+          {mySections.slice(0, 3).map((s) => {
+            const hasSeats = s.openSeats != null && s.totalSeats != null;
+            const open = s.openSeats ?? 0;
+            const waitlist = s.waitlistCount ?? 0;
+            const status = !hasSeats ? null : open > 0 ? 'OPEN' : waitlist > 0 ? 'WL' : 'FULL';
+            const pillBg = status === 'OPEN' ? '#065f46' : status === 'WL' ? '#78350f' : '#374151';
+            const pillColor = status === 'OPEN' ? '#34d399' : status === 'WL' ? '#fbbf24' : '#6b7280';
+            return (
+              <div key={s.registrationNumber} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: '#6b7280', marginBottom: 2 }}>
+                <span style={{ fontFamily: 'monospace' }}>CRN {s.registrationNumber}</span>
+                {status && (
+                  <span style={{ fontSize: 8, fontWeight: 700, padding: '0 4px', borderRadius: 2, background: pillBg, color: pillColor }}>
+                    {status === 'OPEN' ? `${open}/${s.totalSeats}` : status === 'WL' ? `WL ${waitlist}` : 'Full'}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {mySections.length > 3 && (
+            <div style={{ fontSize: 9, color: '#4b5563' }}>+{mySections.length - 3} more</div>
+          )}
         </div>
       )}
       {errMsg === 'session-expired' && (
@@ -861,6 +919,75 @@ function SettingsTab({
           <div style={sub}>A/B/C bars in badge tooltip</div>
         </div>
         <Toggle checked={settings.showGradeBars} onToggle={() => onChange({ showGradeBars: !settings.showGradeBars })} />
+      </div>
+    </div>
+  );
+}
+
+function ChangelogModal({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: '#1f2937',
+        border: '1px solid #374151',
+        borderRadius: 10,
+        width: 280,
+        maxHeight: 420,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}>
+        <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid #374151' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#f9fafb', marginBottom: 2 }}>
+            What's new
+          </div>
+          <div style={{ fontSize: 10, color: '#6b7280' }}>TAMU Registration+</div>
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px' }}>
+          {CHANGELOG.map(({ version, entries }) => (
+            <div key={version} style={{ marginBottom: 14 }}>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: '#500000',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                marginBottom: 6,
+              }}>
+                v{version}
+              </div>
+              <ul style={{ margin: 0, padding: '0 0 0 14px', listStyle: 'disc' }}>
+                {entries.map((e) => (
+                  <li key={e} style={{ fontSize: 11, color: '#d1d5db', marginBottom: 4, lineHeight: 1.5 }}>
+                    {e}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '10px 16px', borderTop: '1px solid #374151' }}>
+          <button
+            onClick={onDismiss}
+            style={{
+              width: '100%',
+              padding: '7px 0',
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#f9fafb',
+              background: '#500000',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            Got it
+          </button>
+        </div>
       </div>
     </div>
   );
