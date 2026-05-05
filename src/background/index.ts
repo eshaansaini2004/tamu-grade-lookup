@@ -356,6 +356,14 @@ async function fetchSectionsFromHowdy(
   }
 }
 
+// ─── install / update handler ─────────────────────────────────────────────────
+
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === 'update') {
+    chrome.storage.local.set({ showChangelog: true });
+  }
+});
+
 // ─── message handler ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -415,6 +423,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       try {
         const sections = await fetchSectionsFromHowdy(dept, number, term);
+
+        // Opportunistically attach seat data from Schedule Builder regblocks.
+        // This works only when the user is logged in; silently skips on 401/403.
+        try {
+          const ac = new AbortController();
+          setTimeout(() => ac.abort(), 6000);
+          const url = `${SCHEDULER_BASE}/api/terms/${encodeURIComponent(term)}/subjects/${dept.toUpperCase()}/courses/${number}/regblocks`;
+          const res = await fetch(url, { credentials: 'include', signal: ac.signal });
+          if (res.ok) {
+            const data = await res.json() as {
+              sections?: { crn?: number | string; openSeats?: number; totalSeats?: number; waitlistCount?: number }[];
+            };
+            const seatMap = new Map<string, { openSeats?: number; totalSeats?: number; waitlistCount?: number }>();
+            for (const s of data.sections ?? []) {
+              if (s.crn != null) seatMap.set(String(s.crn), { openSeats: s.openSeats, totalSeats: s.totalSeats, waitlistCount: s.waitlistCount });
+            }
+            for (const s of sections) {
+              const seat = seatMap.get(s.registrationNumber);
+              if (seat) {
+                s.openSeats = seat.openSeats;
+                s.totalSeats = seat.totalSeats;
+                s.waitlistCount = seat.waitlistCount;
+              }
+            }
+          }
+        } catch { /* not logged in or network error — seat data unavailable */ }
+
         sendResponse({ sections } satisfies FetchSectionsResponse);
       } catch {
         sendResponse({ sections: [] } satisfies FetchSectionsResponse);
