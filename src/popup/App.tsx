@@ -1003,6 +1003,7 @@ export default function App() {
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
   const [focusSearchCount, setFocusSearchCount] = useState(0);
   const [settings, setSettings] = useState<Settings>(SETTINGS_DEFAULT);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -1027,6 +1028,9 @@ export default function App() {
     storageGet('schedules').then(setSchedules);
     storageGet('activeScheduleId').then(setActiveScheduleId);
     storageGet('settings').then(setSettings);
+    chrome.storage.local.get('showChangelog', (r) => {
+      if (r.showChangelog) setShowChangelog(true);
+    });
 
     // Listen for changes from content script
     const unsub = storageOnChanged((changes) => {
@@ -1131,6 +1135,11 @@ export default function App() {
     await saveSettings(next);
   };
 
+  const handleDismissChangelog = () => {
+    setShowChangelog(false);
+    chrome.storage.local.remove('showChangelog');
+  };
+
   return (
     <div style={C.wrap}>
       <div style={C.header}>
@@ -1182,6 +1191,7 @@ export default function App() {
           Open Calendar
         </button>
       </div>
+      {showChangelog && <ChangelogModal onDismiss={handleDismissChangelog} />}
     </div>
   );
 }
